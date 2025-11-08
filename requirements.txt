@@ -20,4 +20,8 @@ boto3
 Pillow
 matplotlib
 yt-dlp
-flasgger
+flask-restx
+fastapi
+uvicorn[standard]
+httpx
+beautifulsoup4

@@ -17,6 +17,7 @@
 
 
 from flask import Flask, request
+from flask_restx import Api, Resource, fields, Namespace
 from queue import Queue
 from services.webhook import send_webhook
 import threading
@@ -26,93 +27,32 @@ import time
 import json
 from version import BUILD_NUMBER  # Import the BUILD_NUMBER
 from app_utils import log_job_status, discover_and_register_blueprints  # Import the discover_and_register_blueprints function
+from routes.restx_resources import register_restx_namespaces
 from services.gcp_toolkit import trigger_cloud_run_job
-from flasgger import Swagger
 
 MAX_QUEUE_LENGTH = int(os.environ.get('MAX_QUEUE_LENGTH', 0))
 
 def create_app():
     app = Flask(__name__)
 
-    # Configure Swagger
-    swagger_config = {
-        "headers": [],
-        "specs": [
-            {
-                "endpoint": "apispec",
-                "route": "/apispec.json",
-                "rule_filter": lambda rule: True,
-                "model_filter": lambda tag: True,
-            }
-        ],
-        "static_url_path": "/flasgger_static",
-        "swagger_ui": True,
-        "specs_route": "/apidocs/",
-        "parse": True,  # Enable parsing of docstrings
-    }
-    
-    swagger_template = {
-        "swagger": "2.0",
-        "info": {
-            "title": "Arkhe Video API",
-            "description": "API para processamento de vídeo, áudio e mídia. Suporta conversão, corte, divisão, transcrição e muito mais.",
-            "version": BUILD_NUMBER,
-            "contact": {
-                "name": "API Support"
+    # Configure Flask-RESTX API (replaces Flasgger)
+    api = Api(
+        app,
+        version=str(BUILD_NUMBER),
+        title='Arkhe Video API',
+        description='API para processamento de vídeo, áudio e mídia. Suporta conversão, corte, divisão, transcrição e muito mais.',
+        doc='/apidocs/',
+        prefix='/',
+        authorizations={
+            'APIKeyHeader': {
+                'type': 'apiKey',
+                'in': 'header',
+                'name': 'x-api-key',
+                'description': 'Chave de API para autenticação. Obtenha sua chave configurando a variável de ambiente API_KEY.'
             }
         },
-        "securityDefinitions": {
-            "APIKeyHeader": {
-                "type": "apiKey",
-                "name": "x-api-key",
-                "in": "header",
-                "description": "Chave de API para autenticação. Obtenha sua chave configurando a variável de ambiente API_KEY."
-            }
-        },
-        "security": [
-            {
-                "APIKeyHeader": []
-            }
-        ],
-        "tags": [
-            {
-                "name": "Video",
-                "description": "Endpoints para processamento de vídeo"
-            },
-            {
-                "name": "Audio",
-                "description": "Endpoints para processamento de áudio"
-            },
-            {
-                "name": "Media",
-                "description": "Endpoints para processamento de mídia geral"
-            },
-            {
-                "name": "Image",
-                "description": "Endpoints para processamento de imagens"
-            },
-            {
-                "name": "Toolkit",
-                "description": "Endpoints utilitários da API"
-            },
-            {
-                "name": "S3",
-                "description": "Endpoints para upload S3"
-            },
-            {
-                "name": "GCP",
-                "description": "Endpoints para Google Cloud Platform"
-            },
-            {
-                "name": "FFmpeg",
-                "description": "Endpoints para operações FFmpeg avançadas"
-            },
-            {
-                "name": "Code",
-                "description": "Endpoints para execução de código"
-            }
-        ]
-    }
+        security='APIKeyHeader'
+    )
 
     # Create a queue to hold tasks
     task_queue = Queue()
@@ -399,6 +339,7 @@ def create_app():
         return decorator
 
     app.queue_task = queue_task
+    app.api = api  # Make API available to routes for namespace registration
 
     # Register special route for Next.js root asset paths first
     from routes.v1.media.feedback import create_root_next_routes
@@ -407,17 +348,8 @@ def create_app():
     # Use the discover_and_register_blueprints function to register all blueprints
     discover_and_register_blueprints(app)
     
-    # Initialize Swagger AFTER blueprints are registered so it can extract docstrings
-    swagger = Swagger(app, config=swagger_config, template=swagger_template)
-    
-    # Force Swagger to rescan routes after blueprint registration
-    # This ensures docstrings are extracted from all registered endpoints
-    try:
-        # Trigger Swagger to rebuild the spec
-        with app.app_context():
-            swagger.get_apispecs()
-    except:
-        pass  # Ignore errors, Swagger will rebuild on first request
+    # Register Flask-RESTX namespaces for Swagger documentation
+    register_restx_namespaces(api)
 
     return app
 
