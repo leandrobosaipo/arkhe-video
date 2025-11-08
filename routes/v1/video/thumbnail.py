@@ -41,6 +41,85 @@ logger = logging.getLogger(__name__)
 })
 @queue_task_wrapper(bypass_queue=False)
 def generate_thumbnail(job_id, data):
+    """
+    Extrai uma thumbnail de um vídeo em um timestamp específico
+    ---
+    tags:
+      - Video
+    security:
+      - APIKeyHeader: []
+    consumes:
+      - application/json
+    produces:
+      - application/json
+    parameters:
+      - in: header
+        name: x-api-key
+        type: string
+        required: true
+        description: Chave de API para autenticação
+        example: sua-chave-api-aqui
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - video_url
+          properties:
+            video_url:
+              type: string
+              format: uri
+              description: URL do arquivo de vídeo
+              example: https://example.com/video.mp4
+            second:
+              type: number
+              description: Segundo do vídeo para extrair a thumbnail (padrão: 0)
+              minimum: 0
+              example: 10.5
+            webhook_url:
+              type: string
+              format: uri
+              description: URL para receber notificação quando o job for concluído
+              example: https://example.com/webhook
+            id:
+              type: string
+              description: ID opcional para rastreamento da requisição
+              example: custom-request-id
+    responses:
+      200:
+        description: Thumbnail extraída com sucesso
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 200
+            endpoint:
+              type: string
+              example: "/v1/video/thumbnail"
+            job_id:
+              type: string
+              example: "a1b2c3d4-e5f6-g7h8-i9j0-k1l2m3n4o5p6"
+            message:
+              type: string
+              example: "success"
+            response:
+              type: string
+              format: uri
+              example: "https://example.com/thumbnail.jpg"
+            build_number:
+              type: string
+              example: "211"
+      202:
+        description: Requisição enfileirada para processamento
+      400:
+        description: Requisição inválida
+      401:
+        description: Não autorizado - API key inválida ou ausente
+      500:
+        description: Erro interno do servidor
+    """
     video_url = data.get('video_url')
     second = data.get('second', 0)  # Default to 0 if not provided
     webhook_url = data.get('webhook_url')

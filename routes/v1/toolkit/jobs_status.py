@@ -33,14 +33,50 @@ logger = logging.getLogger(__name__)
 @queue_task_wrapper(bypass_queue=True)
 def get_all_jobs_status(job_id, data):
     """
-    Get the status of all jobs within a specified time range
-    
-    Args:
-        job_id (str): Job ID assigned by queue_task_wrapper (unused)
-        data (dict): Request data containing optional since_seconds parameter
-    
-    Returns:
-        Tuple of (jobs_status_data, endpoint_string, status_code)
+    Obtém o status de todos os jobs dentro de um intervalo de tempo especificado
+    ---
+    tags:
+      - Toolkit
+    security:
+      - APIKeyHeader: []
+    consumes:
+      - application/json
+    produces:
+      - application/json
+    parameters:
+      - in: header
+        name: x-api-key
+        type: string
+        required: true
+        description: Chave de API para autenticação
+        example: sua-chave-api-aqui
+      - in: body
+        name: body
+        required: false
+        schema:
+          type: object
+          properties:
+            since_seconds:
+              type: integer
+              description: Intervalo de tempo em segundos para buscar jobs (padrão: 600 segundos / 10 minutos)
+              example: 600
+    responses:
+      200:
+        description: Status dos jobs retornado com sucesso
+        schema:
+          type: object
+          additionalProperties:
+            type: string
+            description: Status do job (running, done, etc.)
+          example:
+            "a1b2c3d4-e5f6-g7h8-i9j0-k1l2m3n4o5p6": "done"
+            "b2c3d4e5-f6g7-h8i9-j0k1-l2m3n4o5p6q7": "running"
+      404:
+        description: Diretório de jobs não encontrado
+      401:
+        description: Não autorizado - API key inválida ou ausente
+      500:
+        description: Erro interno do servidor
     """
     logger.info("Retrieving status for all jobs")
     endpoint = "/v1/toolkit/jobs/status"

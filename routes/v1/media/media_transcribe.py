@@ -49,6 +49,135 @@ logger = logging.getLogger(__name__)
 })
 @queue_task_wrapper(bypass_queue=False)
 def transcribe(job_id, data):
+    """
+    Transcreve ou traduz áudio/vídeo usando Whisper
+    ---
+    tags:
+      - Media
+    security:
+      - APIKeyHeader: []
+    consumes:
+      - application/json
+    produces:
+      - application/json
+    parameters:
+      - in: header
+        name: x-api-key
+        type: string
+        required: true
+        description: Chave de API para autenticação
+        example: sua-chave-api-aqui
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          required:
+            - media_url
+          properties:
+            media_url:
+              type: string
+              format: uri
+              description: URL do arquivo de mídia para transcrição
+              example: https://example.com/video.mp4
+            task:
+              type: string
+              enum: [transcribe, translate]
+              description: Tipo de tarefa - transcrever ou traduzir (padrão: transcribe)
+              example: transcribe
+            include_text:
+              type: boolean
+              description: Incluir texto simples na resposta (padrão: true)
+              example: true
+            include_srt:
+              type: boolean
+              description: Incluir arquivo SRT na resposta (padrão: false)
+              example: false
+            include_segments:
+              type: boolean
+              description: Incluir segmentos com timestamps (padrão: false)
+              example: false
+            word_timestamps:
+              type: boolean
+              description: Incluir timestamps por palavra (padrão: false)
+              example: false
+            response_type:
+              type: string
+              enum: [direct, cloud]
+              description: Tipo de resposta - direta ou URLs de cloud storage (padrão: direct)
+              example: direct
+            language:
+              type: string
+              description: Código de idioma para transcrição (opcional, auto-detect se não especificado)
+              example: pt
+            words_per_line:
+              type: integer
+              description: Número máximo de palavras por linha no SRT (mínimo: 1)
+              minimum: 1
+              example: 8
+            webhook_url:
+              type: string
+              format: uri
+              description: URL para receber notificação quando o job for concluído
+              example: https://example.com/webhook
+            id:
+              type: string
+              description: ID opcional para rastreamento da requisição
+              example: custom-request-id
+    responses:
+      200:
+        description: Transcrição concluída com sucesso
+        schema:
+          type: object
+          properties:
+            code:
+              type: integer
+              example: 200
+            endpoint:
+              type: string
+              example: "/v1/transcribe/media"
+            job_id:
+              type: string
+              example: "a1b2c3d4-e5f6-g7h8-i9j0-k1l2m3n4o5p6"
+            message:
+              type: string
+              example: "success"
+            response:
+              type: object
+              properties:
+                text:
+                  type: string
+                  description: Texto transcrito (se include_text=true e response_type=direct)
+                srt:
+                  type: string
+                  description: Conteúdo SRT (se include_srt=true e response_type=direct)
+                segments:
+                  type: array
+                  description: Segmentos com timestamps (se include_segments=true e response_type=direct)
+                text_url:
+                  type: string
+                  format: uri
+                  description: URL do arquivo de texto (se response_type=cloud)
+                srt_url:
+                  type: string
+                  format: uri
+                  description: URL do arquivo SRT (se response_type=cloud)
+                segments_url:
+                  type: string
+                  format: uri
+                  description: URL do arquivo de segmentos (se response_type=cloud)
+            build_number:
+              type: string
+              example: "211"
+      202:
+        description: Requisição enfileirada para processamento
+      400:
+        description: Requisição inválida
+      401:
+        description: Não autorizado - API key inválida ou ausente
+      500:
+        description: Erro interno do servidor
+    """
     media_url = data['media_url']
     task = data.get('task', 'transcribe')
     include_text = data.get('include_text', True)
