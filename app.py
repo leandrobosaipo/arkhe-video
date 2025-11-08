@@ -47,7 +47,8 @@ def create_app():
         ],
         "static_url_path": "/flasgger_static",
         "swagger_ui": True,
-        "specs_route": "/apidocs/"
+        "specs_route": "/apidocs/",
+        "parse": True,  # Enable parsing of docstrings
     }
     
     swagger_template = {
@@ -112,8 +113,6 @@ def create_app():
             }
         ]
     }
-    
-    Swagger(app, config=swagger_config, template=swagger_template)
 
     # Create a queue to hold tasks
     task_queue = Queue()
@@ -407,6 +406,18 @@ def create_app():
     
     # Use the discover_and_register_blueprints function to register all blueprints
     discover_and_register_blueprints(app)
+    
+    # Initialize Swagger AFTER blueprints are registered so it can extract docstrings
+    swagger = Swagger(app, config=swagger_config, template=swagger_template)
+    
+    # Force Swagger to rescan routes after blueprint registration
+    # This ensures docstrings are extracted from all registered endpoints
+    try:
+        # Trigger Swagger to rebuild the spec
+        with app.app_context():
+            swagger.get_apispecs()
+    except:
+        pass  # Ignore errors, Swagger will rebuild on first request
 
     return app
 
