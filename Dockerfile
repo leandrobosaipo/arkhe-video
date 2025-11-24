@@ -170,21 +170,42 @@ RUN fc-cache -f -v
 # ============================================
 WORKDIR /app
 
-# Copy requirements.txt first for better caching
+# ============================================
+# Layer 13: Upgrade pip (Cacheável - raramente muda)
+# ============================================
+RUN pip install --upgrade pip
+
+# ============================================
+# Layer 14: Copy requirements.txt (Muda quando requirements.txt muda)
+# ============================================
 COPY requirements.txt .
 
-# Upgrade pip and install Python dependencies
-# Removido --no-cache-dir para usar cache do pip e acelerar builds
-RUN pip install --upgrade pip && \
-    pip install -r requirements.txt
+# ============================================
+# Layer 15: Install base dependencies (Cacheável - mudam menos)
+# ============================================
+RUN pip install Flask Werkzeug requests gunicorn APScheduler flask-restx httpx \
+    beautifulsoup4 srt numpy google-auth google-auth-oauthlib \
+    google-auth-httplib2 google-api-python-client google-api-core \
+    google-cloud-storage google-cloud-run psutil boto3 Pillow matplotlib \
+    yt-dlp ffmpeg-python
 
 # ============================================
-# Layer 4: Additional Python Packages (Cacheável)
+# Layer 16: Install torch (Cacheável - pesado mas cacheável)
 # ============================================
-RUN pip install openai-whisper jsonschema
+RUN pip install torch
 
 # ============================================
-# Layer 5: Setup User and Directories (Cacheável)
+# Layer 17: Install whisper (Cacheável - pesado mas cacheável)
+# ============================================
+RUN pip install openai-whisper
+
+# ============================================
+# Layer 18: Additional Python Packages (Cacheável)
+# ============================================
+RUN pip install jsonschema
+
+# ============================================
+# Layer 19: Setup User and Directories (Cacheável)
 # ============================================
 RUN useradd -m appuser && \
     mkdir -p /app/whisper_cache && \
@@ -194,24 +215,24 @@ ENV WHISPER_CACHE_DIR="/app/whisper_cache"
 ENV PYTHONUNBUFFERED=1
 
 # ============================================
-# Layer 6: Whisper Model Download (Cacheável)
+# Layer 20: Whisper Model Download (Cacheável)
 # ============================================
 USER appuser
 RUN python -c "import os; print(os.environ.get('WHISPER_CACHE_DIR')); import whisper; whisper.load_model('base')"
 
 # ============================================
-# Layer 7: Playwright Installation (Cacheável)
+# Layer 21: Playwright Installation (Cacheável)
 # ============================================
 RUN pip install --user playwright && \
     python -m playwright install chromium
 
 # ============================================
-# Layer 8: Application Code (Muda Frequentemente)
+# Layer 22: Application Code (Muda Frequentemente)
 # ============================================
 COPY --chown=appuser:appuser . .
 
 # ============================================
-# Layer 9: Final Setup
+# Layer 23: Final Setup
 # ============================================
 RUN echo '#!/bin/bash\n\
 gunicorn --bind 0.0.0.0:8080 \
