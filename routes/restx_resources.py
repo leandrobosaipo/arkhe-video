@@ -4,7 +4,6 @@
 from flask_restx import Namespace, Resource, fields
 from flask import request, current_app
 from services.authentication import authenticate
-from app_utils import queue_task_wrapper
 import logging
 
 logger = logging.getLogger(__name__)
@@ -66,22 +65,12 @@ class TestAPI(Resource):
         """Testa se a API está funcionando corretamente"""
         # Aplicar autenticação
         from services.authentication import authenticate
-        auth_result = authenticate()(lambda: None)()
-        if auth_result and isinstance(auth_result, tuple) and auth_result[1] == 401:
-            return {'error': 'Unauthorized'}, 401
+        auth_check = authenticate(lambda: None)
+        auth_result = auth_check()
+        if auth_result is not None:
+            return auth_result
         
-        # Chamar através do sistema de queue do app
-        from flask import current_app
-        job_id = 'restx-test'
-        data = {}
-        result = current_app.queue_task(bypass_queue=True)(lambda: self._call_test(job_id, data))()
-        if isinstance(result, tuple) and len(result) == 2:
-            return result[0], result[1]
-        return result
-    
-    def _call_test(self, job_id, data):
-        from routes.v1.toolkit.test import test_api
-        return test_api(job_id, data)
+        return call_blueprint_function('v1_toolkit_test.test_api')(self)
 
 # Media - Convert to MP3
 @media_ns.route('/v1/media/convert/mp3')
@@ -102,17 +91,7 @@ class ConvertToMP3(Resource):
     @media_ns.marshal_with(success_response_model, code=200)
     def post(self):
         """Converte arquivos de mídia para formato MP3"""
-        from flask import current_app
-        job_id = 'restx-convert-mp3'
-        data = request.json or {}
-        result = current_app.queue_task(bypass_queue=False)(lambda: self._call_convert_mp3(job_id, data))()
-        if isinstance(result, tuple) and len(result) == 2:
-            return result[0], result[1]
-        return result
-    
-    def _call_convert_mp3(self, job_id, data):
-        from routes.v1.media.convert.media_to_mp3 import convert_media_to_mp3
-        return convert_media_to_mp3(job_id, data)
+        return call_blueprint_function('v1_media_convert_mp3.convert_media_to_mp3')(self)
 
 # Media - Transcribe
 @media_ns.route('/v1/media/transcribe')
@@ -123,8 +102,12 @@ class TranscribeMedia(Resource):
         'task': fields.String(enum=['transcribe', 'translate'], description='Tipo de tarefa', example='transcribe'),
         'include_text': fields.Boolean(description='Incluir texto simples na resposta', example=True),
         'include_srt': fields.Boolean(description='Incluir arquivo SRT na resposta', example=False),
+        'include_segments': fields.Boolean(description='Incluir segmentos detalhados com timestamps', example=False),
+        'word_timestamps': fields.Boolean(description='Incluir timestamps por palavra', example=False),
         'response_type': fields.String(enum=['direct', 'cloud'], description='Tipo de resposta', example='direct'),
+        'language': fields.String(description='Código do idioma para a transcrição', example='pt'),
         'webhook_url': fields.String(description='URL para receber notificação', example='https://example.com/webhook'),
+        'words_per_line': fields.Integer(description='Máximo de palavras por linha no SRT', example=8),
         'id': fields.String(description='ID opcional', example='custom-request-id')
     })
     
@@ -143,17 +126,7 @@ class TranscribeMedia(Resource):
     @media_ns.marshal_with(success_response_model, code=200)
     def post(self):
         """Transcreve ou traduz áudio/vídeo usando Whisper"""
-        from flask import current_app
-        job_id = 'restx-transcribe'
-        data = request.json or {}
-        result = current_app.queue_task(bypass_queue=False)(lambda: self._call_transcribe(job_id, data))()
-        if isinstance(result, tuple) and len(result) == 2:
-            return result[0], result[1]
-        return result
-    
-    def _call_transcribe(self, job_id, data):
-        from routes.v1.media.media_transcribe import transcribe
-        return transcribe(job_id, data)
+        return call_blueprint_function('v1_media_transcribe.transcribe')(self)
 
 # Video - Concatenate
 @video_ns.route('/v1/video/concatenate')
@@ -187,17 +160,7 @@ class ConcatenateVideos(Resource):
     @video_ns.marshal_with(success_response_model, code=200)
     def post(self):
         """Concatena múltiplos vídeos em um único arquivo"""
-        from flask import current_app
-        job_id = 'restx-concatenate-video'
-        data = request.json or {}
-        result = current_app.queue_task(bypass_queue=False)(lambda: self._call_concatenate_video(job_id, data))()
-        if isinstance(result, tuple) and len(result) == 2:
-            return result[0], result[1]
-        return result
-    
-    def _call_concatenate_video(self, job_id, data):
-        from routes.v1.video.concatenate import combine_videos
-        return combine_videos(job_id, data)
+        return call_blueprint_function('v1_video_concatenate.combine_videos')(self)
 
 # Audio - Concatenate
 @audio_ns.route('/v1/audio/concatenate')
@@ -231,17 +194,7 @@ class ConcatenateAudio(Resource):
     @audio_ns.marshal_with(success_response_model, code=200)
     def post(self):
         """Concatena múltiplos arquivos de áudio em um único arquivo"""
-        from flask import current_app
-        job_id = 'restx-concatenate-audio'
-        data = request.json or {}
-        result = current_app.queue_task(bypass_queue=False)(lambda: self._call_concatenate_audio(job_id, data))()
-        if isinstance(result, tuple) and len(result) == 2:
-            return result[0], result[1]
-        return result
-    
-    def _call_concatenate_audio(self, job_id, data):
-        from routes.v1.audio.concatenate import combine_audio
-        return combine_audio(job_id, data)
+        return call_blueprint_function('v1_audio_concatenate.combine_audio')(self)
 
 # S3 - Upload
 @s3_ns.route('/v1/s3/upload')
@@ -270,17 +223,7 @@ class S3Upload(Resource):
     @s3_ns.marshal_with(success_response_model, code=200)
     def post(self):
         """Faz upload de um arquivo para S3 via streaming direto da URL"""
-        from flask import current_app
-        job_id = 'restx-s3-upload'
-        data = request.json or {}
-        result = current_app.queue_task(bypass_queue=False)(lambda: self._call_s3_upload(job_id, data))()
-        if isinstance(result, tuple) and len(result) == 2:
-            return result[0], result[1]
-        return result
-    
-    def _call_s3_upload(self, job_id, data):
-        from routes.v1.s3.upload import s3_upload_endpoint
-        return s3_upload_endpoint(job_id, data)
+        return call_blueprint_function('v1_s3_upload.s3_upload_endpoint')(self)
 
 # Função para registrar todos os namespaces na API
 def register_restx_namespaces(api):

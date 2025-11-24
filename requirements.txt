@@ -21,7 +21,5 @@ Pillow
 matplotlib
 yt-dlp
 flask-restx
-fastapi
-uvicorn[standard]
 httpx
 beautifulsoup4
