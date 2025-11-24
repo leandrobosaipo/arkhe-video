@@ -1,7 +1,9 @@
 # Base image
 FROM python:3.11-slim
 
-# Install system dependencies, build tools, and libraries
+# ============================================
+# Layer 1: System Dependencies (Cacheável)
+# ============================================
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     wget \
@@ -55,7 +57,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgtk-3-0 \
     && rm -rf /var/lib/apt/lists/*
 
-# Install SRT from source (latest version using cmake)
+# ============================================
+# Layer 2: Build Native Libraries (Cacheável)
+# ============================================
+
+# Install SRT from source
 RUN git clone https://github.com/Haivision/srt.git && \
     cd srt && \
     mkdir build && cd build && \
@@ -81,9 +87,9 @@ RUN git clone https://github.com/Netflix/vmaf.git && \
     ninja -C build && \
     ninja -C build install && \
     cd ../.. && rm -rf vmaf && \
-    ldconfig  # Update the dynamic linker cache
+    ldconfig
 
-# Manually build and install fdk-aac (since it is not available via apt-get)
+# Build and install fdk-aac
 RUN git clone https://github.com/mstorsjo/fdk-aac && \
     cd fdk-aac && \
     autoreconf -fiv && \
@@ -92,7 +98,7 @@ RUN git clone https://github.com/mstorsjo/fdk-aac && \
     make install && \
     cd .. && rm -rf fdk-aac
 
-# Install libunibreak (required for ASS_FEATURE_WRAP_UNICODE)
+# Install libunibreak
 RUN git clone https://github.com/adah1972/libunibreak.git && \
     cd libunibreak && \
     ./autogen.sh && \
@@ -102,7 +108,7 @@ RUN git clone https://github.com/adah1972/libunibreak.git && \
     ldconfig && \
     cd .. && rm -rf libunibreak
 
-# Build and install libass with libunibreak support and ASS_FEATURE_WRAP_UNICODE enabled
+# Build and install libass
 RUN git clone https://github.com/libass/libass.git && \
     cd libass && \
     autoreconf -i && \
@@ -113,7 +119,7 @@ RUN git clone https://github.com/libass/libass.git && \
     ldconfig && \
     cd .. && rm -rf libass
 
-# Build and install FFmpeg with all required features
+# Build and install FFmpeg
 RUN git clone https://git.ffmpeg.org/ffmpeg.git ffmpeg && \
     cd ffmpeg && \
     git checkout n7.0.2 && \
@@ -152,57 +158,60 @@ RUN git clone https://git.ffmpeg.org/ffmpeg.git ffmpeg && \
     make install && \
     cd .. && rm -rf ffmpeg
 
-# Add /usr/local/bin to PATH (if not already included)
+# Add /usr/local/bin to PATH
 ENV PATH="/usr/local/bin:${PATH}"
 
-# Copy fonts into the custom fonts directory
+# Copy fonts and rebuild font cache
 COPY ./fonts /usr/share/fonts/custom
-
-# Rebuild the font cache so that fontconfig can see the custom fonts
 RUN fc-cache -f -v
 
-# Set work directory
+# ============================================
+# Layer 3: Python Dependencies (Cacheável)
+# ============================================
 WORKDIR /app
 
-# Set environment variable for Whisper cache
-ENV WHISPER_CACHE_DIR="/app/whisper_cache"
-
-# Create cache directory (no need for chown here yet)
-RUN mkdir -p ${WHISPER_CACHE_DIR} 
-
-# Copy the requirements file first to optimize caching
+# Copy requirements.txt first for better caching
 COPY requirements.txt .
 
-# Install Python dependencies, upgrade pip 
+# Upgrade pip and install Python dependencies
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt && \
-    pip install openai-whisper && \
-    pip install playwright && \
-    pip install jsonschema 
+    pip install --no-cache-dir -r requirements.txt
 
-# Create the appuser 
-RUN useradd -m appuser 
+# ============================================
+# Layer 4: Additional Python Packages (Cacheável)
+# ============================================
+RUN pip install --no-cache-dir openai-whisper jsonschema
 
-# Give appuser ownership of the /app directory (including whisper_cache)
-RUN chown appuser:appuser /app 
+# ============================================
+# Layer 5: Setup User and Directories (Cacheável)
+# ============================================
+RUN useradd -m appuser && \
+    mkdir -p /app/whisper_cache && \
+    chown -R appuser:appuser /app
 
-# Important: Switch to the appuser before downloading the model
-USER appuser
-
-RUN python -c "import os; print(os.environ.get('WHISPER_CACHE_DIR')); import whisper; whisper.load_model('base')"
-
-# Install Playwright Chromium browser as appuser
-RUN playwright install chromium
-
-# Copy the rest of the application code
-COPY . .
-
-# Expose the port the app runs on
-EXPOSE 8080
-
-# Set environment variables
+ENV WHISPER_CACHE_DIR="/app/whisper_cache"
 ENV PYTHONUNBUFFERED=1
 
+# ============================================
+# Layer 6: Whisper Model Download (Cacheável)
+# ============================================
+USER appuser
+RUN python -c "import os; print(os.environ.get('WHISPER_CACHE_DIR')); import whisper; whisper.load_model('base')"
+
+# ============================================
+# Layer 7: Playwright Installation (Cacheável)
+# ============================================
+RUN pip install --no-cache-dir --user playwright && \
+    python -m playwright install chromium
+
+# ============================================
+# Layer 8: Application Code (Muda Frequentemente)
+# ============================================
+COPY --chown=appuser:appuser . .
+
+# ============================================
+# Layer 9: Final Setup
+# ============================================
 RUN echo '#!/bin/bash\n\
 gunicorn --bind 0.0.0.0:8080 \
     --workers ${GUNICORN_WORKERS:-2} \
@@ -213,5 +222,6 @@ gunicorn --bind 0.0.0.0:8080 \
     app:app' > /app/run_gunicorn.sh && \
     chmod +x /app/run_gunicorn.sh
 
-# Run the shell script
+EXPOSE 8080
+
 CMD ["/app/run_gunicorn.sh"]

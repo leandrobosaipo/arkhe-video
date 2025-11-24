@@ -19,6 +19,7 @@
 import os
 import whisper
 import srt
+import json
 from datetime import timedelta
 from whisper.utils import WriteSRT, WriteVTT
 from services.file_management import download_file
@@ -28,6 +29,51 @@ from config import LOCAL_STORAGE_PATH
 # Set up logging
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
+
+def clean_segments_for_json(segments, word_timestamps=False):
+    """
+    Converte segmentos do Whisper para formato JSON-safe.
+    Remove objetos bytes e converte todos os valores para tipos serializáveis.
+    
+    Args:
+        segments: Lista de segmentos do resultado do Whisper
+        word_timestamps: Se True, inclui timestamps por palavra
+        
+    Returns:
+        Lista de dicionários com valores JSON-safe
+    """
+    clean_segments = []
+    for segment in segments:
+        clean_segment = {
+            'id': int(segment.get('id', 0)) if segment.get('id') is not None else None,
+            'seek': int(segment.get('seek', 0)) if segment.get('seek') is not None else None,
+            'start': float(segment.get('start', 0)),
+            'end': float(segment.get('end', 0)),
+            'text': str(segment.get('text', '')),
+            'tokens': [int(t) for t in segment.get('tokens', [])] if segment.get('tokens') else [],
+            'temperature': float(segment.get('temperature', 0)),
+            'avg_logprob': float(segment.get('avg_logprob', 0)),
+            'compression_ratio': float(segment.get('compression_ratio', 0)),
+            'no_speech_prob': float(segment.get('no_speech_prob', 0))
+        }
+        
+        # Adicionar words apenas se word_timestamps estiver habilitado e words existir
+        if word_timestamps and 'words' in segment and segment.get('words'):
+            clean_segment['words'] = []
+            for w in segment.get('words', []):
+                clean_word = {
+                    'word': str(w.get('word', '')),
+                    'start': float(w.get('start', 0)),
+                    'end': float(w.get('end', 0))
+                }
+                # Adicionar probability se existir
+                if 'probability' in w:
+                    clean_word['probability'] = float(w.get('probability', 0))
+                clean_segment['words'].append(clean_word)
+        
+        clean_segments.append(clean_segment)
+    
+    return clean_segments
 
 def process_transcribe_media(media_url, task, include_text, include_srt, include_segments, word_timestamps, response_type, language, job_id, words_per_line=None):
     """Transcribe or translate media and return the transcript/translation, SRT or VTT file path."""
@@ -119,7 +165,8 @@ def process_transcribe_media(media_url, task, include_text, include_srt, include
             srt_text = srt.compose(srt_subtitles)
 
         if include_segments is True:
-            segments_json = result['segments']
+            # Limpar segmentos para garantir serialização JSON segura
+            segments_json = clean_segments_for_json(result['segments'], word_timestamps)
 
         os.remove(input_filename)
         logger.info(f"Removed local file: {input_filename}")
@@ -145,8 +192,8 @@ def process_transcribe_media(media_url, task, include_text, include_srt, include
 
             if include_segments is True:
                 segments_filename = os.path.join(LOCAL_STORAGE_PATH, f"{job_id}.json")
-                with open(segments_filename, 'w') as f:
-                    f.write(str(segments_json))
+                with open(segments_filename, 'w', encoding='utf-8') as f:
+                    json.dump(segments_json, f, ensure_ascii=False, indent=2)
             else:
                 segments_filename = None
 
