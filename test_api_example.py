@@ -9,7 +9,7 @@ import json
 import sys
 
 # Configuração
-API_KEY = "123456"  # Altere para sua chave
+API_KEY = "dev-key-123456"  # Altere para sua chave
 BASE_URL = "http://localhost:8080"
 
 def test_toolkit_test():
