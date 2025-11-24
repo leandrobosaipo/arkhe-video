@@ -199,10 +199,21 @@ def transcribe(job_id, data):
         # If the result is a file path, upload it using the unified upload_file() method
         if response_type == "direct":
            
+            # Garantir que todos os valores sejam JSON-safe antes de criar o dicionário
+            text_value = result[0] if result[0] is not None else None
+            srt_value = result[1] if result[1] is not None else None
+            segments_value = result[2] if result[2] is not None else None
+            
+            # Converter bytes para string se necessário
+            if text_value is not None and isinstance(text_value, bytes):
+                text_value = text_value.decode('utf-8', errors='ignore')
+            if srt_value is not None and isinstance(srt_value, bytes):
+                srt_value = srt_value.decode('utf-8', errors='ignore')
+            
             result_json = {
-                "text": result[0],
-                "srt": result[1],
-                "segments": result[2],
+                "text": text_value,
+                "srt": srt_value,
+                "segments": segments_value,
                 "text_url": None,
                 "srt_url": None,
                 "segments_url": None,

@@ -109,7 +109,12 @@ def process_transcribe_media(media_url, task, include_text, include_srt, include
         logger.info(f"Generated {task} output")
 
         if include_text is True:
-            text = result['text']
+            # Garantir que text seja sempre string, nunca bytes
+            text_value = result.get('text', '')
+            if isinstance(text_value, bytes):
+                text = text_value.decode('utf-8', errors='ignore')
+            else:
+                text = str(text_value) if text_value is not None else None
 
         if include_srt is True:
             srt_subtitles = []
@@ -163,6 +168,11 @@ def process_transcribe_media(media_url, task, include_text, include_srt, include
                     subtitle_index += 1
             
             srt_text = srt.compose(srt_subtitles)
+            # Garantir que srt_text seja sempre string, nunca bytes
+            if srt_text and isinstance(srt_text, bytes):
+                srt_text = srt_text.decode('utf-8', errors='ignore')
+            elif srt_text is not None:
+                srt_text = str(srt_text)
 
         if include_segments is True:
             # Limpar segmentos para garantir serialização JSON segura

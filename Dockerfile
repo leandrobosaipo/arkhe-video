@@ -174,13 +174,14 @@ WORKDIR /app
 COPY requirements.txt .
 
 # Upgrade pip and install Python dependencies
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+# Removido --no-cache-dir para usar cache do pip e acelerar builds
+RUN pip install --upgrade pip && \
+    pip install -r requirements.txt
 
 # ============================================
 # Layer 4: Additional Python Packages (Cacheável)
 # ============================================
-RUN pip install --no-cache-dir openai-whisper jsonschema
+RUN pip install openai-whisper jsonschema
 
 # ============================================
 # Layer 5: Setup User and Directories (Cacheável)
@@ -201,7 +202,7 @@ RUN python -c "import os; print(os.environ.get('WHISPER_CACHE_DIR')); import whi
 # ============================================
 # Layer 7: Playwright Installation (Cacheável)
 # ============================================
-RUN pip install --no-cache-dir --user playwright && \
+RUN pip install --user playwright && \
     python -m playwright install chromium
 
 # ============================================
