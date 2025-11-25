@@ -20,6 +20,7 @@ from flask import Blueprint
 from app_utils import *
 import logging
 import os
+import json
 from services.v1.media.media_transcribe import process_transcribe_media
 from services.authentication import authenticate
 from services.cloud_storage import upload_file
@@ -190,25 +191,53 @@ def transcribe(job_id, data):
     id = data.get('id')
     words_per_line = data.get('words_per_line', None)
 
-    logger.info(f"Job {job_id}: Received transcription request for {media_url}")
+    logger.info(f"Job {job_id}: [01] Recebendo requisição de transcrição | URL: {media_url} | Task: {task}")
 
     try:
+        logger.info(f"Job {job_id}: [02] Parâmetros validados | Include: text={include_text}, srt={include_srt}, segments={include_segments}")
+        
         result = process_transcribe_media(media_url, task, include_text, include_srt, include_segments, word_timestamps, response_type, language, job_id, words_per_line)
-        logger.info(f"Job {job_id}: Transcription process completed successfully")
+        logger.info(f"Job {job_id}: [11] Processamento concluído com sucesso")
 
-        # If the result is a file path, upload it using the unified upload_file() method
         if response_type == "direct":
-           
-            # Garantir que todos os valores sejam JSON-safe antes de criar o dicionário
+            # Extrair valores do resultado
             text_value = result[0] if result[0] is not None else None
             srt_value = result[1] if result[1] is not None else None
             segments_value = result[2] if result[2] is not None else None
             
-            # Converter bytes para string se necessário
-            if text_value is not None and isinstance(text_value, bytes):
-                text_value = text_value.decode('utf-8', errors='ignore')
-            if srt_value is not None and isinstance(srt_value, bytes):
-                srt_value = srt_value.decode('utf-8', errors='ignore')
+            # Proteção dupla: converter bytes para string
+            if text_value is not None:
+                if isinstance(text_value, bytes):
+                    logger.warning(f"Job {job_id}: [09] Convertendo bytes para string | Campo: text")
+                    text_value = text_value.decode('utf-8', errors='ignore')
+                else:
+                    text_value = str(text_value)
+            
+            if srt_value is not None:
+                if isinstance(srt_value, bytes):
+                    logger.warning(f"Job {job_id}: [09] Convertendo bytes para string | Campo: srt")
+                    srt_value = srt_value.decode('utf-8', errors='ignore')
+                else:
+                    srt_value = str(srt_value)
+            
+            # Validar segments antes de incluir
+            if segments_value is not None:
+                if not isinstance(segments_value, list):
+                    logger.warning(f"Job {job_id}: [09] Segments não é lista, convertendo | Tipo: {type(segments_value)}")
+                    segments_value = None
+                else:
+                    # Tentar validar serialização de segments
+                    try:
+                        json.dumps(segments_value)
+                        logger.info(f"Job {job_id}: [09] Segments validado | Total: {len(segments_value)} segmentos")
+                    except (TypeError, ValueError) as e:
+                        logger.error(f"Job {job_id}: [09] Segments não serializável, limpando novamente | Erro: {str(e)}")
+                        # Re-limpar se necessário (chamada recursiva de limpeza)
+                        from services.v1.media.media_transcribe import clean_segments_for_json
+                        segments_value = clean_segments_for_json(
+                            [s for s in segments_value if isinstance(s, dict)], 
+                            word_timestamps
+                        ) if segments_value else None
             
             result_json = {
                 "text": text_value,
@@ -218,31 +247,65 @@ def transcribe(job_id, data):
                 "srt_url": None,
                 "segments_url": None,
             }
-
+            
+            # Validação final de serialização
+            logger.info(f"Job {job_id}: [10] Testando serialização JSON")
+            try:
+                json.dumps(result_json)
+                logger.info(f"Job {job_id}: [10] Serialização OK | Retornando resposta completa")
+            except (TypeError, ValueError) as e:
+                logger.error(f"Job {job_id}: [FALLBACK] Serialização falhou | Erro: {type(e).__name__}: {str(e)}")
+                # Fallback: remover segments e tentar novamente
+                result_json_fallback = {
+                    "text": text_value,
+                    "srt": srt_value,
+                    "segments": None,
+                    "text_url": None,
+                    "srt_url": None,
+                    "segments_url": None,
+                    "warning": "Segments removidos devido a erro de serialização"
+                }
+                try:
+                    json.dumps(result_json_fallback)
+                    logger.warning(f"Job {job_id}: [FALLBACK] Retornando resposta parcial (sem segments)")
+                    result_json = result_json_fallback
+                except Exception as e2:
+                    logger.error(f"Job {job_id}: [ERRO] Fallback também falhou | Erro: {str(e2)}")
+                    raise ValueError(f"Erro crítico de serialização: {str(e2)}")
+            
+            logger.info(f"Job {job_id}: [11] Retornando resposta | Tipo: direct | Campos: text={text_value is not None}, srt={srt_value is not None}, segments={segments_value is not None}")
             return result_json, "/v1/transcribe/media", 200
 
         else:
-
+            logger.info(f"Job {job_id}: [11] Processando resposta cloud | Upload de arquivos")
+            
             cloud_urls = {
                 "text": None,
                 "srt": None,
                 "segments": None,
-                "text_url": upload_file(result[0]) if include_text is True else None,
-                "srt_url": upload_file(result[1]) if include_srt is True else None,
-                "segments_url": upload_file(result[2]) if include_segments is True else None,
+                "text_url": upload_file(result[0]) if include_text is True and result[0] else None,
+                "srt_url": upload_file(result[1]) if include_srt is True and result[1] else None,
+                "segments_url": upload_file(result[2]) if include_segments is True and result[2] else None,
             }
-
-            if include_text is True:
-                os.remove(result[0])  # Remove the temporary file after uploading
             
-            if include_srt is True:
-                os.remove(result[1])
+            # Validação de serialização para cloud também
+            try:
+                json.dumps(cloud_urls)
+                logger.info(f"Job {job_id}: [10] Serialização cloud OK")
+            except (TypeError, ValueError) as e:
+                logger.error(f"Job {job_id}: [ERRO] Cloud URLs não serializáveis | Erro: {str(e)}")
+                raise
 
-            if include_segments is True:
+            if include_text is True and result[0]:
+                os.remove(result[0])
+            if include_srt is True and result[1]:
+                os.remove(result[1])
+            if include_segments is True and result[2]:
                 os.remove(result[2])
             
+            logger.info(f"Job {job_id}: [11] Retornando resposta | Tipo: cloud | URLs: text={cloud_urls['text_url'] is not None}, srt={cloud_urls['srt_url'] is not None}, segments={cloud_urls['segments_url'] is not None}")
             return cloud_urls, "/v1/transcribe/media", 200
 
     except Exception as e:
-        logger.error(f"Job {job_id}: Error during transcription process - {str(e)}")
+        logger.error(f"Job {job_id}: [ERRO] Falha na transcrição | Erro: {type(e).__name__}: {str(e)}")
         return str(e), "/v1/transcribe/media", 500

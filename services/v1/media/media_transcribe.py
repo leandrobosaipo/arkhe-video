@@ -42,51 +42,104 @@ def clean_segments_for_json(segments, word_timestamps=False):
     Returns:
         Lista de dicionários com valores JSON-safe
     """
+    if not segments:
+        return []
+    
     clean_segments = []
-    for segment in segments:
-        clean_segment = {
-            'id': int(segment.get('id', 0)) if segment.get('id') is not None else None,
-            'seek': int(segment.get('seek', 0)) if segment.get('seek') is not None else None,
-            'start': float(segment.get('start', 0)),
-            'end': float(segment.get('end', 0)),
-            'text': str(segment.get('text', '')),
-            'tokens': [int(t) for t in segment.get('tokens', [])] if segment.get('tokens') else [],
-            'temperature': float(segment.get('temperature', 0)),
-            'avg_logprob': float(segment.get('avg_logprob', 0)),
-            'compression_ratio': float(segment.get('compression_ratio', 0)),
-            'no_speech_prob': float(segment.get('no_speech_prob', 0))
-        }
+    for idx, segment in enumerate(segments):
+        # Validar que segment é dict
+        if not isinstance(segment, dict):
+            logger.warning(f"Segmento {idx} ignorado: não é dict | Tipo: {type(segment)}")
+            continue
         
-        # Adicionar words apenas se word_timestamps estiver habilitado e words existir
-        if word_timestamps and 'words' in segment and segment.get('words'):
-            clean_segment['words'] = []
-            for w in segment.get('words', []):
-                clean_word = {
-                    'word': str(w.get('word', '')),
-                    'start': float(w.get('start', 0)),
-                    'end': float(w.get('end', 0))
-                }
-                # Adicionar probability se existir
-                if 'probability' in w:
-                    clean_word['probability'] = float(w.get('probability', 0))
-                clean_segment['words'].append(clean_word)
-        
-        clean_segments.append(clean_segment)
+        try:
+            clean_segment = {}
+            
+            # Processar campos conhecidos
+            for key in ['id', 'seek', 'start', 'end', 'text', 'tokens', 'temperature', 
+                       'avg_logprob', 'compression_ratio', 'no_speech_prob']:
+                value = segment.get(key)
+                
+                if key == 'id':
+                    clean_segment['id'] = int(value) if value is not None else None
+                elif key == 'seek':
+                    clean_segment['seek'] = int(value) if value is not None else None
+                elif key in ['start', 'end']:
+                    clean_segment[key] = float(value) if value is not None else 0.0
+                elif key == 'text':
+                    # Garantir que text seja sempre string
+                    if value is None:
+                        clean_segment['text'] = ''
+                    elif isinstance(value, bytes):
+                        clean_segment['text'] = value.decode('utf-8', errors='ignore')
+                    else:
+                        clean_segment['text'] = str(value)
+                elif key == 'tokens':
+                    if value and isinstance(value, list):
+                        clean_segment['tokens'] = [int(t) for t in value if t is not None]
+                    else:
+                        clean_segment['tokens'] = []
+                elif key in ['temperature', 'avg_logprob', 'compression_ratio', 'no_speech_prob']:
+                    clean_segment[key] = float(value) if value is not None else 0.0
+                else:
+                    # Para campos não conhecidos, tentar converter para tipo seguro
+                    if value is None:
+                        continue
+                    elif isinstance(value, (str, int, float, bool)):
+                        clean_segment[key] = value
+                    elif isinstance(value, bytes):
+                        clean_segment[key] = value.decode('utf-8', errors='ignore')
+            
+            # Processar words se word_timestamps estiver habilitado
+            if word_timestamps and 'words' in segment and segment.get('words'):
+                clean_segment['words'] = []
+                for w_idx, w in enumerate(segment.get('words', [])):
+                    if not isinstance(w, dict):
+                        continue
+                    
+                    try:
+                        clean_word = {}
+                        word_value = w.get('word', '')
+                        
+                        # Garantir que word seja sempre string
+                        if isinstance(word_value, bytes):
+                            clean_word['word'] = word_value.decode('utf-8', errors='ignore')
+                        else:
+                            clean_word['word'] = str(word_value) if word_value is not None else ''
+                        
+                        clean_word['start'] = float(w.get('start', 0)) if w.get('start') is not None else 0.0
+                        clean_word['end'] = float(w.get('end', 0)) if w.get('end') is not None else 0.0
+                        
+                        if 'probability' in w:
+                            clean_word['probability'] = float(w.get('probability', 0)) if w.get('probability') is not None else 0.0
+                        
+                        clean_segment['words'].append(clean_word)
+                    except Exception as e:
+                        logger.warning(f"Palavra {w_idx} no segmento {idx} ignorada: {str(e)}")
+                        continue
+            
+            clean_segments.append(clean_segment)
+            
+        except Exception as e:
+            logger.warning(f"Segmento {idx} ignorado devido a erro: {str(e)}")
+            continue
     
     return clean_segments
 
 def process_transcribe_media(media_url, task, include_text, include_srt, include_segments, word_timestamps, response_type, language, job_id, words_per_line=None):
     """Transcribe or translate media and return the transcript/translation, SRT or VTT file path."""
-    logger.info(f"Starting {task} for media URL: {media_url}")
+    logger.info(f"Job {job_id}: [03] Iniciando {task} | URL: {media_url}")
     input_filename = download_file(media_url, os.path.join(LOCAL_STORAGE_PATH, f"{job_id}_input"))
-    logger.info(f"Downloaded media to local file: {input_filename}")
+    file_size = os.path.getsize(input_filename) if os.path.exists(input_filename) else 0
+    logger.info(f"Job {job_id}: [04] Download concluído | Arquivo: {input_filename} | Tamanho: {file_size} bytes")
 
     try:
         # Load a larger model for better translation quality
         #model_size = "large" if task == "translate" else "base"
         model_size = "base"
+        logger.info(f"Job {job_id}: [05] Carregando modelo Whisper | Modelo: {model_size}")
         model = whisper.load_model(model_size)
-        logger.info(f"Loaded Whisper {model_size} model")
+        logger.info(f"Job {job_id}: [05] Modelo carregado com sucesso")
 
         # Configure transcription/translation options
         options = {
@@ -98,25 +151,29 @@ def process_transcribe_media(media_url, task, include_text, include_srt, include
         # Add language specification if provided
         if language:
             options["language"] = language
-
+        
+        logger.info(f"Job {job_id}: [06] Executando transcrição | Idioma: {language or 'auto'} | Word timestamps: {word_timestamps}")
         result = model.transcribe(input_filename, **options)
+        logger.info(f"Job {job_id}: [06] Transcrição concluída")
         
         # For translation task, the result['text'] will be in English
         text = None
         srt_text = None
         segments_json = None
 
-        logger.info(f"Generated {task} output")
-
         if include_text is True:
+            logger.info(f"Job {job_id}: [07] Processando texto")
             # Garantir que text seja sempre string, nunca bytes
             text_value = result.get('text', '')
             if isinstance(text_value, bytes):
+                logger.warning(f"Job {job_id}: [09] Text é bytes, convertendo para string")
                 text = text_value.decode('utf-8', errors='ignore')
             else:
                 text = str(text_value) if text_value is not None else None
+            logger.info(f"Job {job_id}: [07] Texto processado | Tamanho: {len(text) if text else 0} caracteres")
 
         if include_srt is True:
+            logger.info(f"Job {job_id}: [08] Gerando SRT")
             srt_subtitles = []
             subtitle_index = 1
             
@@ -170,17 +227,21 @@ def process_transcribe_media(media_url, task, include_text, include_srt, include
             srt_text = srt.compose(srt_subtitles)
             # Garantir que srt_text seja sempre string, nunca bytes
             if srt_text and isinstance(srt_text, bytes):
+                logger.warning(f"Job {job_id}: [09] SRT é bytes, convertendo para string")
                 srt_text = srt_text.decode('utf-8', errors='ignore')
             elif srt_text is not None:
                 srt_text = str(srt_text)
+            logger.info(f"Job {job_id}: [08] SRT gerado | Subtítulos: {len(srt_subtitles)} linhas")
 
         if include_segments is True:
+            logger.info(f"Job {job_id}: [09] Sanitizando segmentos | Total: {len(result.get('segments', []))} segmentos | Word timestamps: {word_timestamps}")
             # Limpar segmentos para garantir serialização JSON segura
             segments_json = clean_segments_for_json(result['segments'], word_timestamps)
+            logger.info(f"Job {job_id}: [09] Segmentos sanitizados | Total: {len(segments_json)} segmentos válidos")
 
         os.remove(input_filename)
-        logger.info(f"Removed local file: {input_filename}")
-        logger.info(f"{task.capitalize()} successful, output type: {response_type}")
+        logger.info(f"Job {job_id}: [04] Arquivo temporário removido: {input_filename}")
+        logger.info(f"Job {job_id}: [11] Processamento concluído | Tipo: {response_type}")
 
         if response_type == "direct":
             return text, srt_text, segments_json
@@ -210,5 +271,5 @@ def process_transcribe_media(media_url, task, include_text, include_srt, include
             return text_filename, srt_filename, segments_filename 
 
     except Exception as e:
-        logger.error(f"{task.capitalize()} failed: {str(e)}")
+        logger.error(f"Job {job_id}: [ERRO] Falha na transcrição | Erro: {type(e).__name__}: {str(e)}")
         raise
