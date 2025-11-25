@@ -17,15 +17,37 @@
 
 
 from functools import wraps
-from flask import request, jsonify
+from flask import request, abort
 from config import API_KEY
+import logging
+
+logger = logging.getLogger(__name__)
 
 def authenticate(func):
     @wraps(func)
     def wrapper(*args, **kwargs):
-        api_key = request.headers.get('X-API-Key')
+        # Log de entrada
+        endpoint = request.path
+        method = request.method
+        logger.info(f"[AUTH] Recebendo requisição | Endpoint: {endpoint} | Método: {method}")
         
+        # Suportar tanto X-API-Key quanto x-api-key (minúsculo)
+        api_key = request.headers.get('X-API-Key') or request.headers.get('x-api-key')
+        
+        # Log de validação
+        if not api_key:
+            logger.warning(f"[AUTH] ⚠️ API key ausente | Endpoint: {endpoint}")
+            # Retornar dict ao invés de jsonify para compatibilidade com Flask-RESTX
+            abort(401, description="Unauthorized")
+        
+        logger.info(f"[AUTH] API key presente | Endpoint: {endpoint} | Key length: {len(api_key)}")
+        
+        # Comparar API keys
         if api_key != API_KEY:
-            return jsonify({"message": "Unauthorized"}), 401
+            logger.warning(f"[AUTH] ❌ API key inválida | Endpoint: {endpoint} | Key recebida: {api_key[:10]}...")
+            # Retornar dict ao invés de jsonify para compatibilidade com Flask-RESTX
+            abort(401, description="Unauthorized")
+        
+        logger.info(f"[AUTH] ✅ Autenticação bem-sucedida | Endpoint: {endpoint}")
         return func(*args, **kwargs)
     return wrapper
