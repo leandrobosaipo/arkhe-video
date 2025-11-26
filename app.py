@@ -236,6 +236,8 @@ def create_app():
                     })
 
                     # Execute the function directly (no queue)
+                    # Nota: *args, **kwargs são passados aqui porque esta é uma chamada direta,
+                    # não via lambda. O Flask pode passar argumentos adicionais via *args.
                     logger.info(f"Job {job_id}: [CLOUD_RUN] Executando função...")
                     response = f(job_id=job_id, data=data, *args, **kwargs)
                     run_time = time.time() - start_time
@@ -508,7 +510,9 @@ def create_app():
                         "response": None
                     })
                     
-                    task_queue.put((job_id, data, lambda: f(job_id=job_id, data=data, *args, **kwargs), start_time))
+                    # Corrigido: removido *args, **kwargs do lambda para evitar TypeError
+                    # As funções decoradas têm assinatura f(job_id, data) apenas
+                    task_queue.put((job_id, data, lambda: f(job_id=job_id, data=data), start_time))
                     
                     response_202 = {
                         "code": 202,
