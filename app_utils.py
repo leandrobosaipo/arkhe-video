@@ -47,18 +47,46 @@ def log_job_status(job_id, data):
         job_id (str): The unique job ID
         data (dict): Data to write to the log file
     """
+    import logging
+    logger = logging.getLogger(__name__)
+    
     jobs_dir = os.path.join(LOCAL_STORAGE_PATH, 'jobs')
     
-    # Create jobs directory if it doesn't exist
+    # Validação humanizada: verificar se o diretório pai existe
+    parent_dir = os.path.dirname(jobs_dir)
+    if parent_dir and not os.path.exists(parent_dir):
+        try:
+            logger.info(f"📁 Criando diretório pai: {parent_dir}")
+            os.makedirs(parent_dir, exist_ok=True)
+        except PermissionError as e:
+            logger.error(f"❌ Erro de permissão ao criar diretório {parent_dir}: {e}")
+            logger.error(f"💡 Solução: Verifique as permissões ou altere LOCAL_STORAGE_PATH para um diretório acessível")
+            raise PermissionError(f"Não foi possível criar o diretório {parent_dir}. Verifique as permissões ou altere LOCAL_STORAGE_PATH no EasyPanel.") from e
+    
+    # Validação humanizada: criar diretório de jobs
     if not os.path.exists(jobs_dir):
-        os.makedirs(jobs_dir, exist_ok=True)
+        try:
+            logger.info(f"📁 Criando diretório de jobs: {jobs_dir}")
+            os.makedirs(jobs_dir, exist_ok=True)
+        except PermissionError as e:
+            logger.error(f"❌ Erro de permissão ao criar diretório de jobs {jobs_dir}: {e}")
+            logger.error(f"💡 Solução: Verifique se LOCAL_STORAGE_PATH={LOCAL_STORAGE_PATH} está correto e tem permissões de escrita")
+            raise PermissionError(f"Não foi possível criar o diretório de jobs {jobs_dir}. Verifique LOCAL_STORAGE_PATH no EasyPanel.") from e
     
     # Create or update the job log file
     job_file = os.path.join(jobs_dir, f"{job_id}.json")
     
-    # Write data directly to file
-    with open(job_file, 'w') as f:
-        json.dump(data, f, indent=2)
+    try:
+        # Write data directly to file
+        with open(job_file, 'w') as f:
+            json.dump(data, f, indent=2)
+        logger.debug(f"✅ Status do job {job_id} salvo em {job_file}")
+    except PermissionError as e:
+        logger.error(f"❌ Erro de permissão ao escrever arquivo {job_file}: {e}")
+        raise PermissionError(f"Não foi possível escrever o arquivo de status do job. Verifique as permissões do diretório {jobs_dir}.") from e
+    except Exception as e:
+        logger.error(f"❌ Erro inesperado ao salvar status do job {job_id}: {e}")
+        raise
 
 def queue_task_wrapper(bypass_queue=False):
     def decorator(f):

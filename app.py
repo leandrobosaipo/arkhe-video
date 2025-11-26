@@ -236,10 +236,9 @@ def create_app():
                     })
 
                     # Execute the function directly (no queue)
-                    # Nota: *args, **kwargs são passados aqui porque esta é uma chamada direta,
-                    # não via lambda. O Flask pode passar argumentos adicionais via *args.
+                    # Nota: Funções decoradas têm assinatura f(job_id, data) apenas
                     logger.info(f"Job {job_id}: [CLOUD_RUN] Executando função...")
-                    response = f(job_id=job_id, data=data, *args, **kwargs)
+                    response = f(job_id=job_id, data=data)
                     run_time = time.time() - start_time
 
                     logger.info(f"Job {job_id}: [CLOUD_RUN] Função executada | Status: {response[2]}")
@@ -399,7 +398,7 @@ def create_app():
                     logger.info(f"Job {job_id}: [02] Executando função do endpoint...")
                     
                     try:
-                        response = f(job_id=job_id, data=data, *args, **kwargs)
+                        response = f(job_id=job_id, data=data)
                         run_time = time.time() - start_time
                         
                         # Log DEPOIS de executar - ANTES de criar response_obj
