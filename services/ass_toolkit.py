@@ -750,14 +750,14 @@ def generate_ass_captions_v1(video_url, captions, settings, replace, exclude_tim
 
         if not isinstance(settings, dict):
             logger.error(f"Job {job_id}: 'settings' should be a dictionary.")
-            return {"error": "'settings' should be a dictionary."}
+            return {"error": "O campo 'settings' deve ser um objeto JSON com as configurações de estilo das legendas. Exemplo: {\"font_family\": \"Arial\", \"font_size\": 24}"}
 
         # Normalize keys by replacing hyphens with underscores
         style_options = {k.replace('-', '_'): v for k, v in settings.items()}
 
         if not isinstance(replace, list):
             logger.error(f"Job {job_id}: 'replace' should be a list of objects with 'find' and 'replace' keys.")
-            return {"error": "'replace' should be a list of objects with 'find' and 'replace' keys."}
+            return {"error": "O campo 'replace' deve ser uma lista de objetos. Cada objeto deve ter 'find' (texto a encontrar) e 'replace' (texto substituto). Exemplo: [{\"find\": \"erro\", \"replace\": \"correto\"}]"}
 
         # Convert 'replace' list to dictionary
         replace_dict = {}
@@ -778,7 +778,7 @@ def generate_ass_captions_v1(video_url, captions, settings, replace, exclude_tim
         if font_family not in available_fonts:
             logger.warning(f"Job {job_id}: Font '{font_family}' not found.")
             # Return font error with available_fonts
-            return {"error": f"Font '{font_family}' not available.", "available_fonts": available_fonts}
+            return {"error": f"A fonte '{font_family}' não está disponível no sistema. Use uma das fontes disponíveis listadas abaixo.", "available_fonts": available_fonts}
 
         logger.info(f"Job {job_id}: Font '{font_family}' is available.")
 
@@ -789,7 +789,13 @@ def generate_ass_captions_v1(video_url, captions, settings, replace, exclude_tim
                 captions_content = download_captions(captions)
             except Exception as e:
                 logger.error(f"Job {job_id}: Failed to download captions: {str(e)}")
-                return {"error": f"Failed to download captions: {str(e)}"}
+                error_msg = str(e).lower()
+                if "connection" in error_msg or "timeout" in error_msg:
+                    return {"error": f"Não foi possível baixar o arquivo de legendas da URL fornecida. Verifique se a URL está acessível e tente novamente. Erro: {str(e)}"}
+                elif "not found" in error_msg or "404" in error_msg:
+                    return {"error": f"O arquivo de legendas não foi encontrado na URL fornecida. Verifique se a URL está correta. Erro: {str(e)}"}
+                else:
+                    return {"error": f"Erro ao baixar o arquivo de legendas: {str(e)}"}
         elif captions:
             logger.info(f"Job {job_id}: Captions provided as raw content.")
             captions_content = captions
@@ -802,8 +808,13 @@ def generate_ass_captions_v1(video_url, captions, settings, replace, exclude_tim
             logger.info(f"Job {job_id}: Video downloaded to {video_path}")
         except Exception as e:
             logger.error(f"Job {job_id}: Video download error: {str(e)}")
-            # For non-font errors, do NOT include available_fonts
-            return {"error": str(e)}
+            error_msg = str(e).lower()
+            if "connection" in error_msg or "timeout" in error_msg:
+                return {"error": f"Não foi possível baixar o vídeo da URL fornecida. Verifique sua conexão com a internet e se a URL está acessível. Erro: {str(e)}"}
+            elif "not found" in error_msg or "404" in error_msg:
+                return {"error": f"O vídeo não foi encontrado na URL fornecida. Verifique se a URL está correta e o arquivo existe. Erro: {str(e)}"}
+            else:
+                return {"error": f"Erro ao baixar o vídeo: {str(e)}"}
 
         # Get video resolution, unless provided
         if PlayResX is not None and PlayResY is not None:
@@ -830,7 +841,7 @@ def generate_ass_captions_v1(video_url, captions, settings, replace, exclude_tim
                 logger.info(f"Job {job_id}: Detected SRT formatted captions.")
                 # Validate style for SRT
                 if style_type != 'classic':
-                    error_message = "Only 'classic' style is supported for SRT captions."
+                    error_message = "Apenas o estilo 'classic' é suportado para legendas em formato SRT. Para usar outros estilos (karaoke, highlight, etc.), converta as legendas para formato ASS ou remova o campo 'style' para usar o padrão."
                     logger.error(f"Job {job_id}: {error_message}")
                     return {"error": error_message}
                 transcription_result = srt_to_transcription_result(captions_content)
@@ -871,9 +882,21 @@ def generate_ass_captions_v1(video_url, captions, settings, replace, exclude_tim
             logger.info(f"Job {job_id}: Subtitle file saved to {subtitle_path}")
         except Exception as e:
             logger.error(f"Job {job_id}: Failed to save subtitle file: {str(e)}")
-            return {"error": f"Failed to save subtitle file: {str(e)}"}
+            error_msg = str(e).lower()
+            if "permission" in error_msg:
+                return {"error": f"Erro de permissão ao salvar o arquivo de legendas. Verifique as permissões do diretório de armazenamento. Erro: {str(e)}"}
+            elif "disk" in error_msg or "space" in error_msg:
+                return {"error": f"Espaço em disco insuficiente para salvar o arquivo de legendas. Libere espaço e tente novamente. Erro: {str(e)}"}
+            else:
+                return {"error": f"Erro ao salvar o arquivo de legendas: {str(e)}"}
 
         return subtitle_path
     except Exception as e:
         logger.error(f"Job {job_id}: Error in generate_ass_captions_v1: {str(e)}", exc_info=True)
-        return {"error": str(e)}
+        error_msg = str(e).lower()
+        if "transcription" in error_msg:
+            return {"error": f"Erro ao gerar transcrição do áudio do vídeo. Verifique se o vídeo contém áudio e se o formato é suportado. Erro: {str(e)}"}
+        elif "resolution" in error_msg or "dimension" in error_msg:
+            return {"error": f"Erro ao detectar resolução do vídeo. Verifique se o arquivo de vídeo está corrompido ou em formato não suportado. Erro: {str(e)}"}
+        else:
+            return {"error": f"Erro inesperado ao processar as legendas: {str(e)}"}

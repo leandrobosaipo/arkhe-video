@@ -92,9 +92,56 @@ media_url_model = media_ns.model('MediaURLRequest', {
 def call_blueprint_function(endpoint_name):
     """Helper para chamar funções de blueprint através do sistema de queue"""
     def wrapper(self):
+        import logging
+        logger = logging.getLogger(__name__)
+        
         # Obter função do blueprint através do endpoint
         view_func = current_app.view_functions.get(endpoint_name)
-        if view_func:
+        
+        if not view_func:
+            # Log detalhado quando não encontra
+            logger.error(f"Endpoint function '{endpoint_name}' não encontrado em view_functions")
+            
+            # Tentar encontrar funções relacionadas para ajudar no debug
+            all_functions = list(current_app.view_functions.keys())
+            # Filtrar funções que podem estar relacionadas (mesmo módulo ou similar)
+            endpoint_parts = endpoint_name.split('.')
+            if len(endpoint_parts) >= 2:
+                module_part = endpoint_parts[0]
+                function_part = endpoint_parts[1]
+                related_functions = [
+                    name for name in all_functions
+                    if module_part in name.lower() or function_part in name.lower()
+                ]
+            else:
+                related_functions = [
+                    name for name in all_functions
+                    if any(part in name.lower() for part in endpoint_name.split('.'))
+                ]
+            
+            # Log das funções relacionadas encontradas
+            if related_functions:
+                logger.error(f"Funções relacionadas encontradas (primeiras 10):")
+                for func_name in sorted(related_functions)[:10]:
+                    logger.error(f"  - {func_name}")
+            else:
+                logger.error(f"Nenhuma função relacionada encontrada. Total de funções registradas: {len(all_functions)}")
+            
+            # Retornar erro detalhado com informações úteis
+            error_response = {
+                'error': f'Endpoint function not found: {endpoint_name}',
+                'message': f'A função do endpoint "{endpoint_name}" não foi encontrada. Verifique se o nome do blueprint e da função estão corretos.',
+                'expected': endpoint_name,
+                'suggestion': 'Verifique o nome do blueprint e da função no arquivo de rota. O formato esperado é: {blueprint_name}.{function_name}'
+            }
+            
+            # Adicionar funções relacionadas se houver (limitado para não expor demais)
+            if related_functions:
+                error_response['available_related'] = sorted(related_functions)[:10]
+            
+            return error_response, 500
+        
+        try:
             # Chamar através do sistema de queue
             job_id = 'restx-doc'
             data = request.json if request.is_json else {}
@@ -102,7 +149,13 @@ def call_blueprint_function(endpoint_name):
             if isinstance(result, tuple) and len(result) == 3:
                 return result[0], result[2]  # Retornar (data, status_code)
             return result
-        return {'error': 'Endpoint not found'}, 404
+        except Exception as e:
+            logger.error(f"Erro ao executar função do endpoint '{endpoint_name}': {str(e)}", exc_info=True)
+            return {
+                'error': f'Error executing endpoint: {str(e)}',
+                'endpoint': endpoint_name,
+                'message': 'Ocorreu um erro ao executar a função do endpoint. Verifique os logs do servidor para mais detalhes.'
+            }, 500
     return wrapper
 
 # Toolkit - Test
@@ -870,7 +923,7 @@ class CaptionVideo(Resource):
     @video_ns.marshal_with(success_response_model, code=200)
     def post(self):
         """Adiciona legendas embutidas a um vídeo"""
-        return call_blueprint_function('v1_video_caption.caption_video')(self)
+        return call_blueprint_function('v1_video/caption.caption_video_v1')(self)
 
 # Audio - Concatenate
 @audio_ns.route('/v1/audio/concatenate')
