@@ -265,14 +265,25 @@ def video_split(job_id, data):
                 "end": splits[i]["end"]
             })
             # Remove the local file after upload
+            # Em modo local, manter o arquivo de saída para facilitar acesso
             import os
-            os.remove(output_file)
-            logger.info(f"Job {job_id}: Uploaded and removed split file {i+1}")
+            is_local_mode = os.getenv('LOCAL_STORAGE_MODE', '').lower() == 'true'
+            if not is_local_mode:
+                try:
+                    os.remove(output_file)
+                    logger.info(f"Job {job_id}: Uploaded and removed split file {i+1}")
+                except Exception as e:
+                    logger.warning(f"Job {job_id}: Could not remove split file {output_file}: {str(e)}")
+            else:
+                logger.info(f"Job {job_id}: Modo local ativo - arquivo mantido em: {output_file}")
         
-        # Clean up input file
+        # Clean up input file (sempre remover)
         import os
-        os.remove(input_filename)
-        logger.info(f"Job {job_id}: Removed input file")
+        try:
+            os.remove(input_filename)
+            logger.info(f"Job {job_id}: Removed input file")
+        except Exception as e:
+            logger.warning(f"Job {job_id}: Could not remove input file {input_filename}: {str(e)}")
         
         # Prepare the response with only file URLs
         response = [{"file_url": item["file_url"]} for item in result_files]

@@ -204,9 +204,23 @@ def video_cut(job_id, data):
         
         # Clean up temporary files
         import os
-        os.remove(input_filename)
-        os.remove(output_filename)
-        logger.info(f"Job {job_id}: Removed temporary files")
+        # Sempre remover arquivo de entrada
+        try:
+            os.remove(input_filename)
+            logger.info(f"Job {job_id}: Removed input file: {input_filename}")
+        except Exception as e:
+            logger.warning(f"Job {job_id}: Could not remove input file {input_filename}: {str(e)}")
+        
+        # Em modo local, manter o arquivo de saída para facilitar acesso
+        is_local_mode = os.getenv('LOCAL_STORAGE_MODE', '').lower() == 'true'
+        if not is_local_mode:
+            try:
+                os.remove(output_filename)
+                logger.info(f"Job {job_id}: Cleaned up local output file: {output_filename}")
+            except Exception as e:
+                logger.warning(f"Job {job_id}: Could not remove output file {output_filename}: {str(e)}")
+        else:
+            logger.info(f"Job {job_id}: Modo local ativo - arquivo mantido em: {output_filename}")
         
         logger.info(f"Job {job_id}: Video cut operation completed successfully")
         return cloud_url, "/v1/video/cut", 200
