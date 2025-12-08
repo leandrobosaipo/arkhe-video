@@ -1013,11 +1013,16 @@ Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour,
             else:
                 position_tag = f"{{\\an{an_code}}}"
             
-            # Adicionar tag de cor de fundo
+            # Adicionar todas as tags de cor necessárias
+            # \c = PrimaryColour (cor do texto)
+            text_color_tag = f"{{\\c{line_color}}}"
+            # \3c = OutlineColour (cor do outline/borda)
+            outline_color_tag = f"{{\\3c{outline_color_ass}}}"
+            # \4c = BackColour (cor do fundo da caixa)
             box_color_tag = f"{{\\4c{box_color}}}"
             
-            # Criar evento Dialogue
-            events.append(f"Dialogue: 0,{start_time},{end_time},{style_name},,0,0,0,,{position_tag}{box_color_tag}{text}")
+            # Criar evento Dialogue com todas as tags de cor
+            events.append(f"Dialogue: 0,{start_time},{end_time},{style_name},,0,0,0,,{position_tag}{text_color_tag}{outline_color_tag}{box_color_tag}{text}")
         
         # Finalizar header
         ass_header += "\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
