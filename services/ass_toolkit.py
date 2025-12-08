@@ -210,7 +210,9 @@ def determine_alignment_code(position_str, alignment_str, x, y, video_width, vid
         vertical_center = video_height / 2
     else:
         vertical_base = 1  # Bottom row an codes start at 1
-        vertical_center = (5 * video_height) / 6
+        # Ajustar posição bottom para ficar mais abaixo (mais próximo da parte inferior)
+        # De (5 * video_height) / 6 para (6 * video_height) / 7 (aproximadamente 85.7% vs 83.3%)
+        vertical_center = (6 * video_height) / 7
 
     if 'left' in pos_lower:
         left_boundary = 0
@@ -253,10 +255,11 @@ def create_style_line(style_options, video_resolution):
         logger.warning(f"Font '{font_family}' not found.")
         return {'error': f"Font '{font_family}' not available.", 'available_fonts': available_fonts}
 
-    line_color = rgb_to_ass_color(style_options.get('line_color', '#FFFFFF'))
+    # Cores invertidas: texto preto (#000000) e fundo branco (#FFFFFF) por padrão
+    line_color = rgb_to_ass_color(style_options.get('line_color', '#000000'))
     secondary_color = line_color
     outline_color = rgb_to_ass_color(style_options.get('outline_color', '#000000'))
-    box_color = rgb_to_ass_color(style_options.get('box_color', '#000000'))
+    box_color = rgb_to_ass_color(style_options.get('box_color', '#FFFFFF'))
 
     font_size = style_options.get('font_size', int(video_resolution[1] * 0.05))
     bold = '1' if style_options.get('bold', False) else '0'
@@ -267,7 +270,8 @@ def create_style_line(style_options, video_resolution):
     scale_y = style_options.get('scale_y', '100')
     spacing = style_options.get('spacing', '0')
     angle = style_options.get('angle', '0')
-    border_style = style_options.get('border_style', '1')
+    # BorderStyle 3 = Opaque box (fundo sólido), 1 = Outline apenas
+    border_style = style_options.get('border_style', '3')
     outline_width = style_options.get('outline_width', '2')
     shadow_offset = style_options.get('shadow_offset', '0')
 
@@ -278,11 +282,14 @@ def create_style_line(style_options, video_resolution):
     # Default alignment in style (we override per event)
     alignment = 5
 
+    # Encoding 1 = UTF-8 (suporta caracteres especiais), 0 = ANSI
+    encoding = '1'
+
     style_line = (
         f"Style: Default,{font_family},{font_size},{line_color},{secondary_color},"
         f"{outline_color},{box_color},{bold},{italic},{underline},{strikeout},"
         f"{scale_x},{scale_y},{spacing},{angle},{border_style},{outline_width},"
-        f"{shadow_offset},{alignment},{margin_l},{margin_r},{margin_v},0"
+        f"{shadow_offset},{alignment},{margin_l},{margin_r},{margin_v},{encoding}"
     )
     logger.info(f"Created ASS style line: {style_line}")
     return style_line
@@ -428,7 +435,7 @@ def handle_highlight(transcription_result, style_options, replace_dict, video_re
     )
 
     word_color = rgb_to_ass_color(style_options.get('word_color', '#FFFF00'))
-    line_color = rgb_to_ass_color(style_options.get('line_color', '#FFFFFF'))
+    line_color = rgb_to_ass_color(style_options.get('line_color', '#000000'))
     events = []
 
     logger.info(f"[Highlight] position={position_str}, alignment={alignment_str}, x={final_x}, y={final_y}, an_code={an_code}")
@@ -506,7 +513,7 @@ def handle_underline(transcription_result, style_options, replace_dict, video_re
         video_width=video_resolution[0],
         video_height=video_resolution[1]
     )
-    line_color = rgb_to_ass_color(style_options.get('line_color', '#FFFFFF'))
+    line_color = rgb_to_ass_color(style_options.get('line_color', '#000000'))
     events = []
 
     logger.info(f"[Underline] position={position_str}, alignment={alignment_str}, x={final_x}, y={final_y}, an_code={an_code}")
@@ -604,9 +611,9 @@ def srt_to_ass(transcription_result, style_type, settings, replace_dict, video_r
     Convert transcription result to ASS based on the specified style.
     """
     default_style_settings = {
-        'line_color': '#FFFFFF',
+        'line_color': '#000000',  # Texto preto por padrão
         'word_color': '#FFFF00',
-        'box_color': '#000000',
+        'box_color': '#FFFFFF',  # Fundo branco por padrão
         'outline_color': '#000000',
         'all_caps': False,
         'max_words_per_line': 0,
@@ -618,7 +625,7 @@ def srt_to_ass(transcription_result, style_type, settings, replace_dict, video_r
         'strikeout': False,
         'outline_width': 2,
         'shadow_offset': 0,
-        'border_style': 1,
+        'border_style': 3,  # BorderStyle 3 = Opaque box (fundo sólido)
         'x': None,
         'y': None,
         'position': 'middle_center',

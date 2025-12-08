@@ -302,6 +302,13 @@ def caption_video_v1(job_id, data):
     video_url = data['video_url']
     captions = data.get('captions')
     settings = data.get('settings', {})
+    
+    # Mapear campos Swagger (font_color, background_color) para campos internos (line_color, box_color)
+    if 'font_color' in settings and 'line_color' not in settings:
+        settings['line_color'] = settings.pop('font_color')
+    if 'background_color' in settings and 'box_color' not in settings:
+        settings['box_color'] = settings.pop('background_color')
+    
     replace = data.get('replace', [])
     exclude_time_ranges = data.get('exclude_time_ranges', [])
     webhook_url = data.get('webhook_url')
@@ -563,11 +570,16 @@ def caption_video_v1(job_id, data):
             return {"error": error_info}, "/v1/video/caption", 500
 
         # Clean up the output file after upload
-        try:
-            os.remove(output_path)
-            logger.info(f"Job {job_id}: Cleaned up local output file: {output_path}")
-        except Exception as e:
-            logger.warning(f"Job {job_id}: Could not remove output file {output_path}: {str(e)}")
+        # Em modo local, manter o arquivo para facilitar acesso
+        is_local_mode = os.getenv('LOCAL_STORAGE_MODE', '').lower() == 'true'
+        if not is_local_mode:
+            try:
+                os.remove(output_path)
+                logger.info(f"Job {job_id}: Cleaned up local output file: {output_path}")
+            except Exception as e:
+                logger.warning(f"Job {job_id}: Could not remove output file {output_path}: {str(e)}")
+        else:
+            logger.info(f"Job {job_id}: Modo local ativo - arquivo mantido em: {output_path}")
 
         # Log status final de sucesso
         total_duration = time.time() - start_time
