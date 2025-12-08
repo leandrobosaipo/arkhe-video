@@ -19,7 +19,7 @@
 from flask import Blueprint, jsonify
 from app_utils import validate_payload, queue_task_wrapper, log_job_status
 import logging
-from services.ass_toolkit import generate_ass_captions_v1
+from services.ass_toolkit import generate_ass_captions_v1, generate_multi_captions_ass
 from services.authentication import authenticate
 from services.cloud_storage import upload_file
 import os
@@ -289,7 +289,49 @@ def normalize_swagger_format_to_internal(data):
         },
         "webhook_url": {"type": "string", "format": "uri"},
         "id": {"type": "string"},
-        "language": {"type": "string"}
+        "language": {"type": "string"},
+        "captions_ass_raw": {"type": "string"},
+        "captions_list": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string"},
+                    "start": {"type": "string"},
+                    "end": {"type": "string"},
+                    "position": {
+                        "type": "string",
+                        "enum": [
+                            "bottom_left", "bottom_center", "bottom_right",
+                            "middle_left", "middle_center", "middle_right",
+                            "top_left", "top_center", "top_right"
+                        ]
+                    },
+                    "x": {"type": "integer"},
+                    "y": {"type": "integer"},
+                    "style": {
+                        "type": "object",
+                        "properties": {
+                            "font_family": {"type": "string"},
+                            "font_size": {"type": "integer"},
+                            "font_color": {"type": "string"},
+                            "background_color": {"type": "string"},
+                            "outline_color": {"type": "string"},
+                            "outline_width": {"type": "integer"},
+                            "alignment": {
+                                "type": "string",
+                                "enum": ["left", "center", "right"]
+                            },
+                            "bold": {"type": "boolean"},
+                            "italic": {"type": "boolean"}
+                        },
+                        "additionalProperties": False
+                    }
+                },
+                "required": ["text", "start", "end"],
+                "additionalProperties": False
+            }
+        }
     },
     "required": ["video_url"],
     "additionalProperties": True
@@ -301,6 +343,8 @@ def caption_video_v1(job_id, data):
     
     video_url = data['video_url']
     captions = data.get('captions')
+    captions_ass_raw = data.get('captions_ass_raw')
+    captions_list = data.get('captions_list')
     settings = data.get('settings', {})
     
     # Mapear campos Swagger (font_color, background_color) para campos internos (line_color, box_color)
@@ -352,8 +396,13 @@ def caption_video_v1(job_id, data):
         
         logger.info(f"Job {job_id}: [STAGE: {current_stage}] Starting ASS generation")
         
-        # Process video with the enhanced v1 service
-        output = generate_ass_captions_v1(video_url, captions, settings, replace, exclude_time_ranges, job_id, language)
+        # Check for multi-captions mode first (headline + CTA)
+        if captions_list:
+            logger.info(f"Job {job_id}: Multi-captions mode detected. Processing {len(captions_list)} captions.")
+            output = generate_multi_captions_ass(video_url, captions_list, job_id)
+        else:
+            # Process video with the enhanced v1 service
+            output = generate_ass_captions_v1(video_url, captions, settings, replace, exclude_time_ranges, job_id, language, captions_ass_raw=captions_ass_raw)
         
         if isinstance(output, dict) and 'error' in output:
             # Check if this is a font-related error by checking for 'available_fonts' key

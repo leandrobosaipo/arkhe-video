@@ -24,6 +24,7 @@ import whisper
 from datetime import timedelta
 import srt
 import re
+import unicodedata
 from services.file_management import download_file
 from services.cloud_storage import upload_file  # Ensure this import is present
 import requests  # Ensure requests is imported for webhook handling
@@ -123,8 +124,13 @@ def format_ass_time(seconds):
 
 def process_subtitle_text(text, replace_dict, all_caps, max_words_per_line):
     """Apply text transformations: replacements, all caps, and optional line splitting."""
+    # Normalizar Unicode para NFC (Canonical Composition) para suportar acentos e emojis
+    text = unicodedata.normalize("NFC", text)
     for old_word, new_word in replace_dict.items():
-        text = re.sub(re.escape(old_word), new_word, text, flags=re.IGNORECASE)
+        # Normalizar também as palavras do replace_dict
+        old_word_normalized = unicodedata.normalize("NFC", old_word)
+        new_word_normalized = unicodedata.normalize("NFC", new_word)
+        text = re.sub(re.escape(old_word_normalized), new_word_normalized, text, flags=re.IGNORECASE | re.UNICODE)
     if all_caps:
         text = text.upper()
     if max_words_per_line > 0:
@@ -168,6 +174,7 @@ def download_captions(captions_url):
     try:
         logger.info(f"Downloading captions from URL: {captions_url}")
         response = requests.get(captions_url)
+        response.encoding = 'utf-8'  # Forçar UTF-8 para suportar acentos e emojis
         response.raise_for_status()
         logger.info("Captions downloaded successfully.")
         return response.text
@@ -606,6 +613,139 @@ STYLE_HANDLERS = {
     'word_by_word': handle_word_by_word
 }
 
+def escape_ass_text(text):
+    """
+    Escapa apenas caracteres críticos do ASS sem usar regex complexo.
+    Preserva Unicode completo (acentos, emojis).
+    """
+    # Escapar apenas os caracteres que têm significado especial no ASS
+    text = text.replace('\\', '\\\\')  # Backslash primeiro
+    text = text.replace('{', '\\{')
+    text = text.replace('}', '\\}')
+    # \N é quebra de linha no ASS, então não escapamos se for intencional
+    # Mas escapamos se não for seguido de espaço ou fim de string
+    return text
+
+def generate_unicode_safe_ass(captions_content, settings, video_resolution, job_id):
+    """
+    Gera ASS de forma segura para Unicode sem usar regex complexo.
+    Usa template simples e escapa apenas caracteres críticos.
+    
+    Args:
+        captions_content: Conteúdo SRT como string
+        settings: Dicionário com configurações de estilo
+        video_resolution: Tupla (width, height)
+        job_id: ID do job para logging
+    
+    Returns:
+        String com conteúdo ASS completo
+    """
+    try:
+        # Normalizar settings
+        style_options = {k.replace('-', '_'): v for k, v in settings.items()}
+        
+        # Valores padrão
+        default_style_settings = {
+            'line_color': '#000000',
+            'box_color': '#FFFFFF',
+            'outline_color': '#000000',
+            'font_size': int(video_resolution[1] * 0.05),
+            'font_family': 'Arial',
+            'bold': False,
+            'italic': False,
+            'outline_width': 2,
+            'border_style': 3,
+            'position': 'bottom_center',
+            'alignment': 'center'
+        }
+        style_options = {**default_style_settings, **style_options}
+        
+        # Verificar fonte
+        font_family = style_options.get('font_family', 'Arial')
+        available_fonts = get_available_fonts()
+        if font_family not in available_fonts:
+            return {"error": f"A fonte '{font_family}' não está disponível no sistema.", "available_fonts": available_fonts}
+        
+        # Converter cores
+        line_color = rgb_to_ass_color(style_options.get('line_color', '#000000'))
+        box_color = rgb_to_ass_color(style_options.get('box_color', '#FFFFFF'))
+        outline_color = rgb_to_ass_color(style_options.get('outline_color', '#000000'))
+        
+        # Gerar header ASS básico
+        font_size = style_options.get('font_size', int(video_resolution[1] * 0.05))
+        bold = '1' if style_options.get('bold', False) else '0'
+        italic = '1' if style_options.get('italic', False) else '0'
+        border_style = str(style_options.get('border_style', 3))
+        outline_width = str(style_options.get('outline_width', 2))
+        
+        # Determinar posição
+        position_str = style_options.get('position', 'bottom_center')
+        alignment_str = style_options.get('alignment', 'center')
+        an_code, use_pos, final_x, final_y = determine_alignment_code(
+            position_str, alignment_str, None, None,
+            video_width=video_resolution[0],
+            video_height=video_resolution[1]
+        )
+        
+        # Gerar estilo
+        style_line = (
+            f"Style: Default,{font_family},{font_size},{line_color},{line_color},"
+            f"{outline_color},{box_color},{bold},{italic},0,0,100,100,0,0,{border_style},"
+            f"{outline_width},0,{an_code},20,20,20,1"
+        )
+        
+        # Gerar header ASS
+        ass_header = f"""[Script Info]
+Title: Unicode Safe Captions
+ScriptType: v4.00+
+PlayResX: {video_resolution[0]}
+PlayResY: {video_resolution[1]}
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+{style_line}
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+        
+        # Parse SRT de forma simples
+        try:
+            subtitles = list(srt.parse(captions_content))
+        except Exception as e:
+            logger.error(f"Job {job_id}: Error parsing SRT in unicode_safe mode: {str(e)}")
+            return {"error": f"Erro ao processar formato SRT: {str(e)}"}
+        
+        # Gerar eventos Dialogue
+        events = []
+        for sub in subtitles:
+            # Normalizar Unicode
+            text = unicodedata.normalize("NFC", sub.content.strip())
+            # Escapar caracteres críticos
+            text = escape_ass_text(text)
+            
+            # Formatar tempo ASS
+            start_time = format_ass_time(sub.start.total_seconds())
+            end_time = format_ass_time(sub.end.total_seconds())
+            
+            # Criar tag de posição se necessário
+            if use_pos:
+                position_tag = f"{{\\an{an_code}\\pos({final_x},{final_y})}}"
+            else:
+                position_tag = f"{{\\an{an_code}}}"
+            
+            # Adicionar tag de cor de fundo para garantir fundo branco
+            box_color_tag = f"{{\\4c{box_color}}}"
+            
+            events.append(f"Dialogue: 0,{start_time},{end_time},Default,,0,0,0,,{position_tag}{box_color_tag}{text}")
+        
+        logger.info(f"Job {job_id}: Generated {len(events)} unicode-safe ASS dialogue events.")
+        return ass_header + "\n".join(events) + "\n"
+        
+    except Exception as e:
+        logger.error(f"Job {job_id}: Error in generate_unicode_safe_ass: {str(e)}", exc_info=True)
+        return {"error": f"Erro ao gerar ASS unicode-safe: {str(e)}"}
+
 def srt_to_ass(transcription_result, style_type, settings, replace_dict, video_resolution):
     """
     Convert transcription result to ASS based on the specified style.
@@ -744,7 +884,157 @@ def normalize_exclude_time_ranges(exclude_time_ranges):
         norm.append({"start": start, "end": end})
     return norm
 
-def generate_ass_captions_v1(video_url, captions, settings, replace, exclude_time_ranges, job_id, language='auto', PlayResX=None, PlayResY=None):
+def save_raw_ass_file(raw_ass_content, job_id):
+    """
+    Salva conteúdo ASS raw diretamente em arquivo sem parsing.
+    
+    Args:
+        raw_ass_content: String com conteúdo ASS completo
+        job_id: ID do job para nomear o arquivo
+    
+    Returns:
+        Caminho do arquivo ASS salvo
+    """
+    subtitle_filename = f"{job_id}.ass"
+    subtitle_path = os.path.join(LOCAL_STORAGE_PATH, subtitle_filename)
+    try:
+        with open(subtitle_path, 'w', encoding='utf-8') as f:
+            f.write(raw_ass_content)
+        logger.info(f"Job {job_id}: Raw ASS file saved to {subtitle_path}")
+        return subtitle_path
+    except Exception as e:
+        logger.error(f"Job {job_id}: Failed to save raw ASS file: {str(e)}")
+        error_msg = str(e).lower()
+        if "permission" in error_msg:
+            raise Exception(f"Erro de permissão ao salvar o arquivo de legendas. Verifique as permissões do diretório de armazenamento. Erro: {str(e)}")
+        elif "disk" in error_msg or "space" in error_msg:
+            raise Exception(f"Espaço em disco insuficiente para salvar o arquivo de legendas. Libere espaço e tente novamente. Erro: {str(e)}")
+        else:
+            raise Exception(f"Erro ao salvar o arquivo de legendas: {str(e)}")
+
+def generate_multi_captions_ass(video_url, captions_list, job_id, PlayResX=None, PlayResY=None):
+    """
+    Gera ASS com múltiplas legendas (headline + CTA) em posições diferentes.
+    
+    Args:
+        video_url: URL do vídeo
+        captions_list: Lista de dicionários com legendas, cada uma com text, start, end, position, style
+        job_id: ID do job
+        PlayResX: Largura do vídeo (opcional)
+        PlayResY: Altura do vídeo (opcional)
+    
+    Returns:
+        Caminho do arquivo ASS gerado
+    """
+    try:
+        # Download video para obter resolução
+        try:
+            video_path = download_file(video_url, LOCAL_STORAGE_PATH)
+            logger.info(f"Job {job_id}: Video downloaded to {video_path}")
+        except Exception as e:
+            logger.error(f"Job {job_id}: Video download error: {str(e)}")
+            return {"error": f"Erro ao baixar vídeo: {str(e)}"}
+        
+        # Obter resolução
+        if PlayResX is not None and PlayResY is not None:
+            video_resolution = (PlayResX, PlayResY)
+        else:
+            video_resolution = get_video_resolution(video_path)
+        
+        logger.info(f"Job {job_id}: Video resolution: {video_resolution[0]}x{video_resolution[1]}")
+        
+        # Gerar header ASS
+        ass_header = f"""[Script Info]
+Title: Multi Captions (Headline + CTA)
+ScriptType: v4.00+
+PlayResX: {video_resolution[0]}
+PlayResY: {video_resolution[1]}
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+"""
+        
+        # Gerar estilos e eventos para cada legenda
+        events = []
+        style_names = []
+        
+        for idx, caption in enumerate(captions_list):
+            # Obter configurações de estilo (com defaults)
+            caption_style = caption.get('style', {})
+            font_family = caption_style.get('font_family', 'Arial')
+            font_size = caption_style.get('font_size', int(video_resolution[1] * 0.05))
+            font_color = caption_style.get('font_color', '#000000')
+            background_color = caption_style.get('background_color', '#FFFFFF')
+            outline_color = caption_style.get('outline_color', '#000000')
+            outline_width = caption_style.get('outline_width', 2)
+            bold = '1' if caption_style.get('bold', False) else '0'
+            italic = '1' if caption_style.get('italic', False) else '0'
+            
+            # Converter cores
+            line_color = rgb_to_ass_color(font_color)
+            box_color = rgb_to_ass_color(background_color)
+            outline_color_ass = rgb_to_ass_color(outline_color)
+            
+            # Criar nome do estilo único
+            style_name = f"Style{idx}"
+            style_names.append(style_name)
+            
+            # Determinar posição
+            position_str = caption.get('position', 'bottom_center')
+            alignment_str = caption_style.get('alignment', 'center')
+            x = caption.get('x')
+            y = caption.get('y')
+            
+            an_code, use_pos, final_x, final_y = determine_alignment_code(
+                position_str, alignment_str, x, y,
+                video_width=video_resolution[0],
+                video_height=video_resolution[1]
+            )
+            
+            # Criar linha de estilo
+            style_line = (
+                f"Style: {style_name},{font_family},{font_size},{line_color},{line_color},"
+                f"{outline_color_ass},{box_color},{bold},{italic},0,0,100,100,0,0,3,"
+                f"{outline_width},0,{an_code},20,20,20,1"
+            )
+            ass_header += style_line + "\n"
+            
+            # Normalizar texto Unicode
+            text = unicodedata.normalize("NFC", caption['text'])
+            text = escape_ass_text(text)
+            
+            # Formatar tempos
+            start_time = format_ass_time(parse_time_string(caption['start']))
+            end_time = format_ass_time(parse_time_string(caption['end']))
+            
+            # Criar tag de posição
+            if use_pos:
+                position_tag = f"{{\\an{an_code}\\pos({final_x},{final_y})}}"
+            else:
+                position_tag = f"{{\\an{an_code}}}"
+            
+            # Adicionar tag de cor de fundo
+            box_color_tag = f"{{\\4c{box_color}}}"
+            
+            # Criar evento Dialogue
+            events.append(f"Dialogue: 0,{start_time},{end_time},{style_name},,0,0,0,,{position_tag}{box_color_tag}{text}")
+        
+        # Finalizar header
+        ass_header += "\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
+        
+        # Combinar tudo
+        ass_content = ass_header + "\n".join(events) + "\n"
+        
+        # Salvar arquivo
+        subtitle_path = save_raw_ass_file(ass_content, job_id)
+        logger.info(f"Job {job_id}: Generated multi-captions ASS with {len(captions_list)} captions")
+        return subtitle_path
+        
+    except Exception as e:
+        logger.error(f"Job {job_id}: Error in generate_multi_captions_ass: {str(e)}", exc_info=True)
+        return {"error": f"Erro ao gerar múltiplas legendas: {str(e)}"}
+
+def generate_ass_captions_v1(video_url, captions, settings, replace, exclude_time_ranges, job_id, language='auto', PlayResX=None, PlayResY=None, captions_ass_raw=None):
     """
     Captioning process with transcription fallback and multiple styles.
     Integrates with the updated logic for positioning and alignment.
@@ -788,6 +1078,21 @@ def generate_ass_captions_v1(video_url, captions, settings, replace, exclude_tim
             return {"error": f"A fonte '{font_family}' não está disponível no sistema. Use uma das fontes disponíveis listadas abaixo.", "available_fonts": available_fonts}
 
         logger.info(f"Job {job_id}: Font '{font_family}' is available.")
+
+        # Check for raw ASS content first (highest priority - bypass all parsing)
+        if captions_ass_raw:
+            logger.info(f"Job {job_id}: Raw ASS content provided via captions_ass_raw. Saving directly without parsing.")
+            try:
+                # Download video first (needed for resolution check if needed)
+                video_path = download_file(video_url, LOCAL_STORAGE_PATH)
+                logger.info(f"Job {job_id}: Video downloaded to {video_path}")
+                
+                # Save raw ASS directly
+                subtitle_path = save_raw_ass_file(captions_ass_raw, job_id)
+                return subtitle_path
+            except Exception as e:
+                logger.error(f"Job {job_id}: Error processing raw ASS: {str(e)}")
+                return {"error": f"Erro ao processar ASS raw: {str(e)}"}
 
         # Determine if captions is a URL or raw content
         if captions and is_url(captions):
@@ -839,16 +1144,69 @@ def generate_ass_captions_v1(video_url, captions, settings, replace, exclude_tim
         if captions_content:
             # Check if it's ASS by looking for '[Script Info]'
             if '[Script Info]' in captions_content:
-                # It's ASS directly
-                subtitle_content = captions_content
-                subtitle_type = 'ass'
-                logger.info(f"Job {job_id}: Detected ASS formatted captions.")
+                # It's ASS directly - save without parsing
+                logger.info(f"Job {job_id}: Detected ASS formatted captions. Saving directly without parsing.")
+                subtitle_path = save_raw_ass_file(captions_content, job_id)
+                return subtitle_path
             else:
                 # Treat as SRT
                 logger.info(f"Job {job_id}: Detected SRT formatted captions.")
-                # Validate style for SRT
+                
+                # Check for unicode_safe flag
+                if style_options.get('unicode_safe', False):
+                    logger.info(f"Job {job_id}: Unicode safe mode enabled. Using simple ASS generation without complex parsing.")
+                    # Download video first to get resolution
+                    try:
+                        video_path = download_file(video_url, LOCAL_STORAGE_PATH)
+                        logger.info(f"Job {job_id}: Video downloaded to {video_path}")
+                        if PlayResX is None or PlayResY is None:
+                            video_resolution = get_video_resolution(video_path)
+                        else:
+                            video_resolution = (PlayResX, PlayResY)
+                    except Exception as e:
+                        logger.error(f"Job {job_id}: Video download error in unicode_safe mode: {str(e)}")
+                        error_msg = str(e).lower()
+                        if "connection" in error_msg or "timeout" in error_msg:
+                            return {"error": f"Não foi possível baixar o vídeo da URL fornecida. Verifique sua conexão com a internet e se a URL está acessível. Erro: {str(e)}"}
+                        elif "not found" in error_msg or "404" in error_msg:
+                            return {"error": f"O vídeo não foi encontrado na URL fornecida. Verifique se a URL está correta e o arquivo existe. Erro: {str(e)}"}
+                        else:
+                            return {"error": f"Erro ao baixar o vídeo: {str(e)}"}
+                    
+                    # Generate unicode-safe ASS
+                    subtitle_content = generate_unicode_safe_ass(captions_content, settings, video_resolution, job_id)
+                    if isinstance(subtitle_content, dict) and 'error' in subtitle_content:
+                        return subtitle_content
+                    
+                    # Save the unicode-safe ASS
+                    subtitle_path = save_raw_ass_file(subtitle_content, job_id)
+                    return subtitle_path
+                
+                # Download video for normal SRT processing
+                try:
+                    video_path = download_file(video_url, LOCAL_STORAGE_PATH)
+                    logger.info(f"Job {job_id}: Video downloaded to {video_path}")
+                except Exception as e:
+                    logger.error(f"Job {job_id}: Video download error: {str(e)}")
+                    error_msg = str(e).lower()
+                    if "connection" in error_msg or "timeout" in error_msg:
+                        return {"error": f"Não foi possível baixar o vídeo da URL fornecida. Verifique sua conexão com a internet e se a URL está acessível. Erro: {str(e)}"}
+                    elif "not found" in error_msg or "404" in error_msg:
+                        return {"error": f"O vídeo não foi encontrado na URL fornecida. Verifique se a URL está correta e o arquivo existe. Erro: {str(e)}"}
+                    else:
+                        return {"error": f"Erro ao baixar o vídeo: {str(e)}"}
+                
+                # Get video resolution, unless provided
+                if PlayResX is not None and PlayResY is not None:
+                    video_resolution = (PlayResX, PlayResY)
+                    logger.info(f"Job {job_id}: Using provided PlayResX/PlayResY = {PlayResX}x{PlayResY}")
+                else:
+                    video_resolution = get_video_resolution(video_path)
+                    logger.info(f"Job {job_id}: Video resolution detected = {video_resolution[0]}x{video_resolution[1]}")
+                
+                # Validate style for SRT (normal mode)
                 if style_type != 'classic':
-                    error_message = "Apenas o estilo 'classic' é suportado para legendas em formato SRT. Para usar outros estilos (karaoke, highlight, etc.), converta as legendas para formato ASS ou remova o campo 'style' para usar o padrão."
+                    error_message = "Apenas o estilo 'classic' é suportado para legendas em formato SRT. Para usar outros estilos (karaoke, highlight, etc.), converta as legendas para formato ASS ou remova o campo 'style' para usar o padrão. Para suporte Unicode completo, use 'unicode_safe: true' no settings."
                     logger.error(f"Job {job_id}: {error_message}")
                     return {"error": error_message}
                 transcription_result = srt_to_transcription_result(captions_content)
@@ -857,6 +1215,28 @@ def generate_ass_captions_v1(video_url, captions, settings, replace, exclude_tim
                 subtitle_type = 'ass'
         else:
             # No captions provided, generate transcription
+            # Download video first
+            try:
+                video_path = download_file(video_url, LOCAL_STORAGE_PATH)
+                logger.info(f"Job {job_id}: Video downloaded to {video_path}")
+            except Exception as e:
+                logger.error(f"Job {job_id}: Video download error: {str(e)}")
+                error_msg = str(e).lower()
+                if "connection" in error_msg or "timeout" in error_msg:
+                    return {"error": f"Não foi possível baixar o vídeo da URL fornecida. Verifique sua conexão com a internet e se a URL está acessível. Erro: {str(e)}"}
+                elif "not found" in error_msg or "404" in error_msg:
+                    return {"error": f"O vídeo não foi encontrado na URL fornecida. Verifique se a URL está correta e o arquivo existe. Erro: {str(e)}"}
+                else:
+                    return {"error": f"Erro ao baixar o vídeo: {str(e)}"}
+            
+            # Get video resolution, unless provided
+            if PlayResX is not None and PlayResY is not None:
+                video_resolution = (PlayResX, PlayResY)
+                logger.info(f"Job {job_id}: Using provided PlayResX/PlayResY = {PlayResX}x{PlayResY}")
+            else:
+                video_resolution = get_video_resolution(video_path)
+                logger.info(f"Job {job_id}: Video resolution detected = {video_resolution[0]}x{video_resolution[1]}")
+            
             logger.info(f"Job {job_id}: No captions provided, generating transcription.")
             transcription_result = generate_transcription(video_path, language=language)
             # Generate ASS based on chosen style
