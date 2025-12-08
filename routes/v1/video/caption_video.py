@@ -225,7 +225,8 @@ def normalize_swagger_format_to_internal(data):
                 "outline_width": {"type": "integer"},
                 "spacing": {"type": "integer"},
                 "angle": {"type": "integer"},
-                "shadow_offset": {"type": "integer"}
+                "shadow_offset": {"type": "integer"},
+                "unicode_safe": {"type": "boolean"}
             },
             "additionalProperties": False
         },
@@ -290,6 +291,7 @@ def normalize_swagger_format_to_internal(data):
         "webhook_url": {"type": "string", "format": "uri"},
         "id": {"type": "string"},
         "language": {"type": "string"},
+        "unicode_safe": {"type": "boolean"},
         "captions_ass_raw": {"type": "string"},
         "captions_list": {
             "type": "array",
