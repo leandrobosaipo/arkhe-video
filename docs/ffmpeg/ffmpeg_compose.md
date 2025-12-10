@@ -243,3 +243,113 @@ The main application context (`app.py`) includes error handling for the processi
 - Monitor the queue length and adjust the maximum queue length as needed to prevent overloading the system.
 - Implement retry mechanisms for handling failed webhook deliveries or other transient errors.
 - Use unique and descriptive `id` values for each request to aid in troubleshooting and monitoring.
+
+## 9. Emoji Font Support
+
+The `/v1/ffmpeg/compose` endpoint supports rendering emojis in text overlays using the `drawtext` filter or colored emojis using the `subtitles` filter with ASS files.
+
+### Font Location
+
+**Docker/EasyPanel:**
+- The Noto Color Emoji font is pre-installed in the Docker image.
+- Font path: `/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf`
+- No additional installation required.
+
+**macOS (Local Development):**
+- You need to install the Noto Color Emoji font manually.
+- See [FONTES_EMOJI.md](../../FONTES_EMOJI.md) for detailed installation instructions.
+
+### Using Emojis with drawtext Filter
+
+The `drawtext` filter can render emojis, but **does not support colored emojis**. Emojis will appear in grayscale or monochrome.
+
+**Example: Adding text with emoji using drawtext**
+
+```json
+{
+  "inputs": [
+    {
+      "file_url": "https://example.com/video.mp4"
+    }
+  ],
+  "filters": [
+    {
+      "filter": "drawtext=text='Olá 😎 Mundo':fontfile=/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf:fontsize=48:x=100:y=100:fontcolor=white"
+    }
+  ],
+  "outputs": [
+    {
+      "options": [
+        {"option": "-c:v", "argument": "libx264"},
+        {"option": "-c:a", "argument": "copy"}
+      ]
+    }
+  ],
+  "webhook_url": "https://example.com/webhook",
+  "id": "emoji-drawtext-example"
+}
+```
+
+**Note:** On macOS, use the path to your installed Noto Color Emoji font, typically:
+- `fontfile=/System/Library/Fonts/Supplemental/Apple Color Emoji.ttc` (Apple Color Emoji)
+- Or the path where you installed Noto Color Emoji
+
+### Using Colored Emojis with subtitles Filter
+
+For **colored emojis**, use the `subtitles` filter with an ASS (Advanced SubStation Alpha) subtitle file. The `subtitles` filter uses libass, which fully supports colored emoji fonts.
+
+**Example: Using subtitles with ASS file for colored emojis**
+
+1. Create an ASS file with emoji support:
+
+```ass
+[Script Info]
+Title: Emoji Subtitle
+ScriptType: v4.00+
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Noto Color Emoji,48,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,1,0,2,10,10,10,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:01.00,0:00:05.00,Default,,0,0,0,,Olá 😎 Mundo!
+```
+
+2. Upload the ASS file to a publicly accessible URL.
+
+3. Use it in the compose request:
+
+```json
+{
+  "inputs": [
+    {
+      "file_url": "https://example.com/video.mp4"
+    }
+  ],
+  "filters": [
+    {
+      "filter": "subtitles='https://example.com/legendas.ass'"
+    }
+  ],
+  "outputs": [
+    {
+      "options": [
+        {"option": "-c:v", "argument": "libx264"},
+        {"option": "-c:a", "argument": "copy"}
+      ]
+    }
+  ],
+  "webhook_url": "https://example.com/webhook",
+  "id": "emoji-subtitles-example"
+}
+```
+
+### Limitations
+
+- **drawtext filter**: Supports emojis but renders them in monochrome/grayscale. Does not support colored emojis.
+- **subtitles filter**: Fully supports colored emojis when using ASS files with proper font configuration.
+
+### Additional Resources
+
+For detailed font installation instructions and more examples, see [FONTES_EMOJI.md](../../FONTES_EMOJI.md).

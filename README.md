@@ -67,6 +67,7 @@ Each endpoint is supported by robust payload validation and detailed API documen
 
 - **[`/v1/ffmpeg/compose`](https://github.com/stephengpope/no-code-architects-toolkit/blob/main/docs/ffmpeg/ffmpeg_compose.md)**
   - Provides a flexible interface to FFmpeg for complex media processing operations.
+  - **Emoji Support**: Supports rendering emojis in text overlays using the `drawtext` filter or colored emojis via `subtitles` filter with ASS files. The Noto Color Emoji font is pre-installed in Docker images. For local development on macOS, see [FONTES_EMOJI.md](FONTES_EMOJI.md) for installation instructions.
 
 ### Image
 

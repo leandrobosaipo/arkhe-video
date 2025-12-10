@@ -160,6 +160,33 @@ brew install ffmpeg
 sudo apt-get update && sudo apt-get install -y ffmpeg
 ```
 
+### Instalar Fonte de Emoji (Opcional - para usar emojis no endpoint /v1/ffmpeg/compose)
+
+Se você quiser usar emojis no endpoint `/v1/ffmpeg/compose`, é necessário instalar a fonte Noto Color Emoji no macOS:
+
+**macOS:**
+
+1. **Baixar a fonte:**
+   ```bash
+   mkdir -p ~/Library/Fonts
+   curl -L -o ~/Library/Fonts/NotoColorEmoji.ttf \
+     https://github.com/googlefonts/noto-emoji/raw/main/fonts/NotoColorEmoji.ttf
+   ```
+
+2. **Atualizar cache de fontes:**
+   ```bash
+   fc-cache -fv
+   ```
+
+3. **Verificar instalação:**
+   ```bash
+   fc-list | grep -i "noto.*emoji\|emoji"
+   ```
+
+**Nota:** No Docker, a fonte Noto Color Emoji já está instalada automaticamente. Não é necessária nenhuma ação adicional.
+
+Para mais detalhes e exemplos de uso, consulte [FONTES_EMOJI.md](../FONTES_EMOJI.md).
+
 ## Rodar com Docker (Alternativa)
 
 Se preferir usar Docker:

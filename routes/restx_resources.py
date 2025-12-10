@@ -1181,28 +1181,111 @@ class ExecutePython(Resource):
 @ffmpeg_ns.route('/v1/ffmpeg/compose')
 @ffmpeg_ns.doc(security='APIKeyHeader')
 class FFmpegCompose(Resource):
-    ffmpeg_compose_model = ffmpeg_ns.model('FFmpegComposeRequest', {
-        'media_url': fields.String(
+    # Modelos aninhados para FFmpeg Compose
+    ffmpeg_option_model = ffmpeg_ns.model('FFmpegOption', {
+        'option': fields.String(
             required=True,
-            description='URL pública do arquivo de mídia para processar. Onde conseguir: URL de arquivo hospedado. Onde interfere: Arquivo será baixado e processado.',
+            description='Nome da opção FFmpeg (ex: "-c:v", "-crf", "-ss"). Onde conseguir: Nome da opção FFmpeg. Onde interfere: Define qual opção será aplicada.',
+            example='-c:v'
+        ),
+        'argument': fields.Raw(
+            description='Argumento da opção (string, número ou null). Onde conseguir: Valor correspondente à opção. Onde interfere: Define valor da opção. Variações: String para codecs, número para valores numéricos, null para flags sem argumento.',
+            example='libx264'
+        )
+    })
+    
+    ffmpeg_input_model = ffmpeg_ns.model('FFmpegInput', {
+        'file_url': fields.String(
+            required=True,
+            description='URL pública do arquivo de entrada. Onde conseguir: URL de arquivo hospedado publicamente. Onde interfere: Arquivo será baixado e usado como entrada.',
             example='https://example.com/video.mp4'
         ),
-        'ffmpeg_command': fields.String(
+        'options': fields.List(
+            fields.Nested(ffmpeg_option_model),
+            description='Opções FFmpeg para o arquivo de entrada (ex: "-ss" para início, "-t" para duração). Onde conseguir: Array de objetos {option, argument}. Onde interfere: Aplica opções antes de processar o arquivo. Exemplos: [{"option": "-ss", "argument": 10}] para começar em 10s.',
+            example=[{'option': '-ss', 'argument': 10}]
+        )
+    })
+    
+    ffmpeg_filter_model = ffmpeg_ns.model('FFmpegFilter', {
+        'filter': fields.String(
             required=True,
-            description='Comando FFmpeg customizado (sem ffmpeg e input/output). Onde conseguir: String com argumentos FFmpeg. Onde interfere: Define operação a realizar. Exemplos: "-vf scale=1280:720" para redimensionar, "-af volume=0.5" para ajustar volume.',
-            example='-vf scale=1280:720 -c:v libx264 -preset medium -crf 23'
+            description='Filtro FFmpeg completo (ex: "scale=1280:720", "drawtext=text=\'Hello\':fontsize=24"). Onde conseguir: String com sintaxe de filtro FFmpeg. Onde interfere: Aplica transformações ao vídeo/áudio. Exemplos: "hflip" para espelhar, "drawtext=text=\'Olá 😎\':fontfile=/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf:fontsize=48" para texto com emoji. Nota: Para emojis coloridos, use filtro "subtitles" com arquivo ASS.',
+            example='drawtext=text=\'Olá 😎\':fontfile=/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf:fontsize=48:x=100:y=100'
+        )
+    })
+    
+    ffmpeg_output_model = ffmpeg_ns.model('FFmpegOutput', {
+        'options': fields.List(
+            fields.Nested(ffmpeg_option_model),
+            required=True,
+            description='Opções FFmpeg para o arquivo de saída (codecs, qualidade, formato). Onde conseguir: Array de objetos {option, argument}. Onde interfere: Define formato e qualidade do arquivo de saída. Exemplos: [{"option": "-c:v", "argument": "libx264"}, {"option": "-crf", "argument": 23}].',
+            example=[{'option': '-c:v', 'argument': 'libx264'}, {'option': '-crf', 'argument': 23}]
+        )
+    })
+    
+    ffmpeg_metadata_model = ffmpeg_ns.model('FFmpegMetadata', {
+        'thumbnail': fields.Boolean(
+            description='Incluir thumbnail na resposta. Onde conseguir: true/false. Onde interfere: Se true, gera e retorna URL do thumbnail.',
+            example=True
+        ),
+        'filesize': fields.Boolean(
+            description='Incluir tamanho do arquivo na resposta. Onde conseguir: true/false. Onde interfere: Se true, retorna tamanho em bytes.',
+            example=True
+        ),
+        'duration': fields.Boolean(
+            description='Incluir duração na resposta. Onde conseguir: true/false. Onde interfere: Se true, retorna duração em segundos.',
+            example=True
+        ),
+        'bitrate': fields.Boolean(
+            description='Incluir bitrate na resposta. Onde conseguir: true/false. Onde interfere: Se true, retorna bitrate em bits/segundo.',
+            example=True
+        ),
+        'encoder': fields.Boolean(
+            description='Incluir codecs usados na resposta. Onde conseguir: true/false. Onde interfere: Se true, retorna codecs de vídeo e áudio.',
+            example=True
+        )
+    })
+    
+    ffmpeg_compose_model = ffmpeg_ns.model('FFmpegComposeRequest', {
+        'inputs': fields.List(
+            fields.Nested(ffmpeg_input_model),
+            required=True,
+            description='Array de arquivos de entrada. Onde conseguir: Array de objetos com file_url e opções opcionais. Onde interfere: Define quais arquivos serão processados. Mínimo: 1 arquivo.',
+            example=[{'file_url': 'https://example.com/video.mp4'}]
+        ),
+        'filters': fields.List(
+            fields.Nested(ffmpeg_filter_model),
+            description='Array de filtros FFmpeg a aplicar. Onde conseguir: Array de objetos com filter. Onde interfere: Aplica transformações (redimensionar, texto, efeitos). Exemplos: [{"filter": "scale=1280:720"}], [{"filter": "drawtext=text=\'Olá 😎\':fontfile=/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf:fontsize=48"}]. Nota: Para emojis coloridos, use "subtitles" com arquivo ASS hospedado.',
+            example=[{'filter': 'scale=1280:720'}]
+        ),
+        'outputs': fields.List(
+            fields.Nested(ffmpeg_output_model),
+            required=True,
+            description='Array de configurações de saída. Onde conseguir: Array de objetos com options. Onde interfere: Define formato e qualidade dos arquivos gerados. Mínimo: 1 saída.',
+            example=[{'options': [{'option': '-c:v', 'argument': 'libx264'}, {'option': '-crf', 'argument': 23}]}]
+        ),
+        'global_options': fields.List(
+            fields.Nested(ffmpeg_option_model),
+            description='Opções globais FFmpeg (aplicadas antes dos inputs). Onde conseguir: Array de objetos {option, argument}. Onde interfere: Aplica opções globais como "-y" para sobrescrever arquivos.',
+            example=[{'option': '-y'}]
+        ),
+        'metadata': fields.Nested(
+            ffmpeg_metadata_model,
+            description='Metadados a incluir na resposta. Onde conseguir: Objeto com flags booleanas. Onde interfere: Define quais informações extras serão retornadas.',
+            example={'thumbnail': True, 'filesize': True}
         ),
         'webhook_url': webhook_url_field,
         'id': id_field
     })
     
     @ffmpeg_ns.doc(
-        description='Executa comando FFmpeg customizado em um arquivo de mídia. O que faz: Permite usar qualquer operação FFmpeg disponível com controle total. Onde usar: Para operações avançadas não cobertas por outros endpoints. Requer: Conhecimento de sintaxe FFmpeg. Exemplos: Filtros de vídeo (-vf), filtros de áudio (-af), codecs, conversões avançadas.',
+        description='Interface flexível para compor comandos FFmpeg complexos. O que faz: Permite construir qualquer operação FFmpeg com controle total sobre inputs, filtros e outputs. Onde usar: Para operações avançadas não cobertas por outros endpoints. Requer: Conhecimento de sintaxe FFmpeg. Exemplos: Redimensionar vídeo (scale), adicionar texto com emojis (drawtext), aplicar efeitos (hflip, vflip), conversões avançadas. Suporte a emojis: Use fontfile=/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf no drawtext (Docker) ou fonte instalada localmente (macOS). Para emojis coloridos, use filtro "subtitles" com arquivo ASS. Veja FONTES_EMOJI.md para detalhes de instalação.',
         body=ffmpeg_compose_model,
         responses={
             200: 'Processamento concluído - retorna URL do arquivo processado',
             202: 'Requisição enfileirada',
-            400: 'Comando FFmpeg inválido ou sintaxe incorreta',
+            400: 'Payload inválido ou parâmetros incorretos',
             401: 'Não autorizado',
             500: 'Erro ao executar FFmpeg'
         }
@@ -1210,7 +1293,7 @@ class FFmpegCompose(Resource):
     @ffmpeg_ns.expect(ffmpeg_compose_model)
     @ffmpeg_ns.marshal_with(success_response_model, code=200)
     def post(self):
-        """Executa comando FFmpeg customizado"""
+        """Executa comando FFmpeg customizado com estrutura flexível"""
         return call_blueprint_function('v1_ffmpeg_compose.ffmpeg_compose')(self)
 
 # Função para registrar todos os namespaces na API
