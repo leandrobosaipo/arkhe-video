@@ -17,6 +17,7 @@
 
 
 import os
+import platform
 import ffmpeg
 import logging
 import subprocess
@@ -113,6 +114,32 @@ def get_available_fonts():
             continue
     logger.info(f"Available fonts retrieved: {font_names}")
     return list(font_names)
+
+def get_emoji_font():
+    """
+    Detecta qual fonte de emoji está disponível no sistema.
+    Retorna 'Apple Color Emoji' no macOS, 'Noto Color Emoji' no Linux/Docker.
+    """
+    available_fonts = get_available_fonts()
+    
+    # macOS: usar Apple Color Emoji
+    if platform.system() == 'Darwin':
+        if 'Apple Color Emoji' in available_fonts:
+            return 'Apple Color Emoji'
+    
+    # Linux/Docker: usar Noto Color Emoji
+    if 'Noto Color Emoji' in available_fonts:
+        return 'Noto Color Emoji'
+    
+    # Fallback: tentar outras fontes de emoji comuns
+    emoji_fonts = ['Apple Color Emoji', 'Noto Color Emoji', 'Segoe UI Emoji', 'EmojiOne Color']
+    for font in emoji_fonts:
+        if font in available_fonts:
+            return font
+    
+    # Se nenhuma fonte de emoji encontrada, retornar None
+    logger.warning("Nenhuma fonte de emoji encontrada no sistema")
+    return None
 
 def format_ass_time(seconds):
     """Convert float seconds to ASS time format H:MM:SS.cc"""
@@ -1021,8 +1048,18 @@ Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour,
             # \4c = BackColour (cor do fundo da caixa)
             box_color_tag = f"{{\\4c{box_color}}}"
             
-            # Criar evento Dialogue com todas as tags de cor
-            events.append(f"Dialogue: 0,{start_time},{end_time},{style_name},,0,0,0,,{position_tag}{text_color_tag}{outline_color_tag}{box_color_tag}{text}")
+            # Detectar fonte de emoji disponível para fallback
+            emoji_font = get_emoji_font()
+            
+            # Adicionar tags de fonte para fallback de emojis
+            # \fn define a fonte principal, \r força fallback para fonte de emoji
+            if emoji_font:
+                font_tags = f"{{\\fn{font_family}}}{{\\r{emoji_font}}}"
+            else:
+                font_tags = f"{{\\fn{font_family}}}"
+            
+            # Criar evento Dialogue com fallback de fonte e todas as tags de cor
+            events.append(f"Dialogue: 0,{start_time},{end_time},{style_name},,0,0,0,,{position_tag}{font_tags}{text_color_tag}{outline_color_tag}{box_color_tag}{text}")
         
         # Finalizar header
         ass_header += "\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
